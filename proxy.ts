@@ -11,30 +11,42 @@ function isPublic(pathname: string): boolean {
 }
 
 export async function proxy(req: NextRequest) {
-  const { pathname } = req.nextUrl;
-  const token = req.cookies.get(SESSION_COOKIE)?.value;
-  const session = await verifySession(token);
+  // Wrap the entire flow so any thrown error (e.g. AUTH_SECRET unset on the
+  // deploy and verifySession crashes) falls through to the page renderer
+  // instead of bubbling up as a platform-level 404 / 500.
+  try {
+    const { pathname } = req.nextUrl;
+    const token = req.cookies.get(SESSION_COOKIE)?.value;
+    let session = null;
+    try {
+      session = await verifySession(token);
+    } catch {
+      session = null;
+    }
 
-  if (isPublic(pathname)) {
-    if (session && (pathname === "/login" || pathname === "/register")) {
+    if (isPublic(pathname)) {
+      if (session && (pathname === "/login" || pathname === "/register")) {
+        const url = req.nextUrl.clone();
+        url.pathname = "/";
+        return NextResponse.redirect(url);
+      }
+      return NextResponse.next();
+    }
+
+    if (!session) {
+      if (pathname.startsWith("/api/")) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
       const url = req.nextUrl.clone();
-      url.pathname = "/";
+      url.pathname = "/login";
+      url.searchParams.set("from", pathname);
       return NextResponse.redirect(url);
     }
+
+    return NextResponse.next();
+  } catch {
     return NextResponse.next();
   }
-
-  if (!session) {
-    if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const url = req.nextUrl.clone();
-    url.pathname = "/login";
-    url.searchParams.set("from", pathname);
-    return NextResponse.redirect(url);
-  }
-
-  return NextResponse.next();
 }
 
 export const config = {
