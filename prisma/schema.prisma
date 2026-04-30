@@ -1,0 +1,108 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  user
+  admin
+}
+
+enum SubscriptionStatus {
+  active
+  trialing
+  past_due
+  canceled
+}
+
+model Plan {
+  // The slug is both the PK and the value persisted on User.planSlug, so
+  // changing it requires care — bump sortOrder / rename label instead.
+  slug                   String   @id
+  name                   String
+  description            String?
+  monthlyPriceCents      Int      @default(0)
+  currency               String   @default("USD")
+  auditsPerMonth         Int      @default(100)
+  rewritesPerMonth       Int      @default(25)
+  storageBytes           BigInt   @default(1000000000)
+  sourcesPerProgrammatic Int      @default(20)
+  features               String[] @default([])
+  sortOrder              Int      @default(0)
+  isActive               Boolean  @default(true)
+  isPublic               Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  users                  User[]
+}
+
+model User {
+  id            String        @id @default(cuid())
+  // Sequential per-user counter (1, 2, 3, …). Display formats this as
+  // `SEMG${BASE + accountNumber}` where BASE = 2723050, so the first user
+  // shows as SEMG2723051. See lib/auth/account-id.ts.
+  accountNumber Int           @unique @default(autoincrement())
+  email         String        @unique
+  passwordHash  String
+  name          String?
+  role          UserRole      @default(user)
+
+  // Subscription state. Plan tier is now a FK to the editable Plan table so
+  // admins can change pricing/limits without code changes.
+  planSlug              String             @default("starter")
+  plan                  Plan               @relation(fields: [planSlug], references: [slug], onUpdate: Cascade)
+  subscriptionStatus    SubscriptionStatus @default(active)
+  currentPeriodEnd      DateTime?
+  cancelAtPeriodEnd     Boolean            @default(false)
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  audits        SeoAnalysis[]
+  rewrites      RewritePage[]
+
+  @@index([planSlug])
+}
+
+model RewritePage {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  url         String
+  title       String?
+  storagePath String
+  byteSize    Int      @default(0)
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model SeoAnalysis {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  url           String
+  command       String   @default("page")
+  industry      String?
+  overallScore  Int
+  scores        Json
+  parsed        Json
+  report        Json
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([url])
+  @@index([command])
+  @@index([createdAt])
+}
