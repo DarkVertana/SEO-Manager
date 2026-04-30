@@ -1,9 +1,13 @@
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth/server";
 import { bytesAsNumber } from "@/lib/auth/plan";
-import NewAuditForm from "./NewAuditForm";
-import type { PlanCard } from "./UpgradeDialog";
+import AppShell from "./(app)/AppShell";
+import NewAuditForm from "./(app)/NewAuditForm";
+import type { PlanCard } from "./(app)/UpgradeDialog";
 
+// Lives at the app root (not inside the (app) route group) so Next.js 16
+// + Vercel resolve `/` to a real route. Wrapped in <AppShell> so the
+// session check + header + footer match every other authenticated page.
 export default async function HomePage() {
   const session = await getSession();
   if (!session) return null;
@@ -49,19 +53,21 @@ export default async function HomePage() {
   }));
 
   return (
-    <div className="mx-auto flex min-h-[calc(100dvh-130px)] w-full max-w-[1400px] flex-col items-center justify-center px-4 py-10 sm:px-6 sm:py-16 lg:px-12">
-      <div className="flex w-full max-w-2xl flex-col items-center gap-6 text-center sm:gap-8">
-        <span className="swiss-eyebrow text-muted">— SEO / MANAGER</span>
-        <h1 className="text-balance text-4xl font-medium leading-[1.05] tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
-          Audit any URL.
-        </h1>
-        <p className="max-w-md text-pretty text-sm leading-relaxed text-muted sm:text-base">
-          AI-powered SEO workspace for audits, architecture, and content.
-        </p>
-        <div className="w-full max-w-xl text-left">
-          <NewAuditForm currentPlanSlug={me?.planSlug ?? "starter"} plans={plans} />
+    <AppShell>
+      <div className="mx-auto flex min-h-[calc(100dvh-130px)] w-full max-w-[1400px] flex-col items-center justify-center px-4 py-10 sm:px-6 sm:py-16 lg:px-12">
+        <div className="flex w-full max-w-2xl flex-col items-center gap-6 text-center sm:gap-8">
+          <span className="swiss-eyebrow text-muted">— SEO / MANAGER</span>
+          <h1 className="text-balance text-4xl font-medium leading-[1.05] tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
+            Audit any URL.
+          </h1>
+          <p className="max-w-md text-pretty text-sm leading-relaxed text-muted sm:text-base">
+            AI-powered SEO workspace for audits, architecture, and content.
+          </p>
+          <div className="w-full max-w-xl text-left">
+            <NewAuditForm currentPlanSlug={me?.planSlug ?? "starter"} plans={plans} />
+          </div>
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }
