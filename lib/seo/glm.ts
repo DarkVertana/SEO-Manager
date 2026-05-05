@@ -40,6 +40,35 @@ function getKey(): string {
   return key;
 }
 
+// The audit pipeline fans out 7 agents in parallel (see lib/seo/audit.ts);
+// architecture/programmatic add more. Without throttling, z.ai returns
+// 429 "Rate limit reached for requests" (code 1302). Limit live in-flight
+// chat calls to GLM_CONCURRENCY (default 2) and retry on 429 with backoff.
+const CONCURRENCY = Math.max(1, Number(process.env.GLM_CONCURRENCY ?? 2));
+const MAX_RETRIES = Math.max(0, Number(process.env.GLM_MAX_RETRIES ?? 5));
+
+let inFlight = 0;
+const waiters: (() => void)[] = [];
+
+async function acquire(): Promise<void> {
+  if (inFlight < CONCURRENCY) {
+    inFlight++;
+    return;
+  }
+  await new Promise<void>((resolve) => waiters.push(resolve));
+  inFlight++;
+}
+
+function release(): void {
+  inFlight--;
+  const next = waiters.shift();
+  if (next) next();
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 async function chat(args: {
   messages: ChatMessage[];
   model?: string;
@@ -47,30 +76,50 @@ async function chat(args: {
   max_tokens?: number;
   response_format?: ResponseFormat;
 }): Promise<string> {
-  const res = await fetch(`${BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getKey()}`,
-    },
-    body: JSON.stringify({
-      model: args.model ?? GLM_MODEL,
-      messages: args.messages,
-      temperature: args.temperature,
-      max_tokens: args.max_tokens,
-      response_format: args.response_format,
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`GLM chat failed: ${res.status} ${body}`);
+  await acquire();
+  try {
+    let attempt = 0;
+    while (true) {
+      const res = await fetch(`${BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getKey()}`,
+        },
+        body: JSON.stringify({
+          model: args.model ?? GLM_MODEL,
+          messages: args.messages,
+          temperature: args.temperature,
+          max_tokens: args.max_tokens,
+          response_format: args.response_format,
+        }),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as {
+          choices?: { message?: { content?: string } }[];
+        };
+        const text = json.choices?.[0]?.message?.content;
+        if (!text) throw new Error("GLM returned an empty response");
+        return text;
+      }
+      const body = await res.text().catch(() => "");
+      // Retry on 429 (rate limit) and 5xx with exponential backoff.
+      const retryable = res.status === 429 || (res.status >= 500 && res.status < 600);
+      if (retryable && attempt < MAX_RETRIES) {
+        const retryAfterHeader = Number(res.headers.get("retry-after"));
+        const headerDelay = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+          ? retryAfterHeader * 1000
+          : 0;
+        const backoff = Math.min(15000, 800 * Math.pow(2, attempt)) + Math.random() * 250;
+        await sleep(Math.max(headerDelay, backoff));
+        attempt++;
+        continue;
+      }
+      throw new Error(`GLM chat failed: ${res.status} ${body}`);
+    }
+  } finally {
+    release();
   }
-  const json = (await res.json()) as {
-    choices?: { message?: { content?: string } }[];
-  };
-  const text = json.choices?.[0]?.message?.content;
-  if (!text) throw new Error("GLM returned an empty response");
-  return text;
 }
 
 // glm-5.1 ignores response_format.json_schema and frequently wraps output in
