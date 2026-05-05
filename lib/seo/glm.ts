@@ -69,6 +69,17 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// glm-5.1 is a reasoning model: by default it spends most of its latency
+// emitting hidden thinking tokens before any content. Our SEO prompts are
+// straightforward JSON extraction (classify findings, fill a known schema),
+// so the reasoning is wasted time — we measured single agents taking 95s and
+// 221s with thinking on, blowing past the 300s Vercel hobby cap. Disable it
+// unless GLM_THINKING=enabled is set explicitly.
+const THINKING_ENABLED = process.env.GLM_THINKING === "enabled";
+// Hard cap on completion tokens so a single call cannot eat the entire
+// function budget. Schemas top out around ~2.5k tokens of output.
+const DEFAULT_MAX_TOKENS = Math.max(256, Number(process.env.GLM_MAX_TOKENS ?? 4000));
+
 async function chat(args: {
   messages: ChatMessage[];
   model?: string;
@@ -90,8 +101,9 @@ async function chat(args: {
           model: args.model ?? GLM_MODEL,
           messages: args.messages,
           temperature: args.temperature,
-          max_tokens: args.max_tokens,
+          max_tokens: args.max_tokens ?? DEFAULT_MAX_TOKENS,
           response_format: args.response_format,
+          thinking: { type: THINKING_ENABLED ? "enabled" : "disabled" },
         }),
       });
       if (res.ok) {
