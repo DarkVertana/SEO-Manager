@@ -4,7 +4,7 @@ import { generateSeoContent } from "@/lib/seo/generator/pipeline";
 import type { GenerateOutputType } from "@/lib/seo/generator/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 600;
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   const session = await getSession();
