@@ -94,8 +94,13 @@ function sleep(ms: number): Promise<void> {
 // unless GLM_THINKING=enabled is set explicitly.
 const THINKING_ENABLED = process.env.GLM_THINKING === "enabled";
 // Hard cap on completion tokens so a single call cannot eat the entire
-// function budget. Schemas top out around ~2.5k tokens of output.
-const DEFAULT_MAX_TOKENS = Math.max(256, Number(process.env.GLM_MAX_TOKENS ?? 2500));
+// function budget. The programmatic-SEO schema (alternativePlaybooks,
+// pageTemplate.sections, schemaJsonLd, internalLinkingPlan, etc.) routinely
+// emits ~3-4k tokens; cutting it off produces an unterminated JSON string
+// that parseJsonLoose cannot fully recover from. Default high enough to
+// cover every schema we use; calls that need less finish well before the
+// cap, so this is purely an upper bound.
+const DEFAULT_MAX_TOKENS = Math.max(256, Number(process.env.GLM_MAX_TOKENS ?? 6000));
 
 async function chat(args: {
   messages: ChatMessage[];
@@ -133,10 +138,20 @@ async function chat(args: {
       });
       if (res.ok) {
         const json = (await res.json()) as {
-          choices?: { message?: { content?: string } }[];
+          choices?: { message?: { content?: string }; finish_reason?: string }[];
         };
-        const text = json.choices?.[0]?.message?.content;
+        const choice = json.choices?.[0];
+        const text = choice?.message?.content;
         if (!text) throw new Error("GLM returned an empty response");
+        // finish_reason "length" means we hit max_tokens mid-output. The
+        // body is valid prefix-wise but almost certainly malformed JSON.
+        // Surface a clear error so the caller knows to raise GLM_MAX_TOKENS
+        // rather than chasing a confusing JSON parse failure downstream.
+        if (choice?.finish_reason === "length") {
+          throw new Error(
+            `GLM response truncated at max_tokens (${args.max_tokens ?? DEFAULT_MAX_TOKENS}). Raise GLM_MAX_TOKENS or shorten the schema.`,
+          );
+        }
         return text;
       }
       const body = await res.text().catch(() => "");
@@ -196,9 +211,64 @@ function parseJsonLoose<T>(raw: string): T {
     const open = text[start];
     const close = open === "{" ? "}" : "]";
     const end = text.lastIndexOf(close);
-    if (end <= start) throw new Error(`GLM returned non-JSON output: ${raw.slice(0, 200)}`);
-    return JSON.parse(text.slice(start, end + 1)) as T;
+    const slice = end > start ? text.slice(start, end + 1) : text.slice(start);
+    try {
+      return JSON.parse(slice) as T;
+    } catch {
+      // Best-effort recovery for truncated output: close the dangling string
+      // (if any), drop a trailing partial value/key, and balance brackets.
+      const repaired = repairJson(slice, open === "{" ? "object" : "array");
+      try {
+        return JSON.parse(repaired) as T;
+      } catch {
+        throw new Error(`GLM returned non-JSON output: ${raw.slice(0, 200)}…`);
+      }
+    }
   }
+}
+
+// Walk the body tracking string/escape state and the bracket stack, then
+// emit the closers needed to form a parseable shape. Truncated arrays of
+// objects (most common failure for our schemas) typically just need the
+// final object closed off and a few "]"/"}" appended.
+function repairJson(input: string, top: "object" | "array"): string {
+  let inString = false;
+  let escape = false;
+  const stack: string[] = [];
+  let lastSafe = 0;
+  for (let i = 0; i < input.length; i++) {
+    const c = input[i];
+    if (escape) { escape = false; continue; }
+    if (c === "\\") { escape = true; continue; }
+    if (inString) {
+      if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; continue; }
+    if (c === "{" || c === "[") stack.push(c);
+    else if (c === "}" || c === "]") stack.pop();
+    if (!inString && (c === "," || c === "}" || c === "]") && stack.length > 0) {
+      lastSafe = i;
+    }
+  }
+  // Trim back to the last safe boundary, then close everything still open.
+  let trimmed = input.slice(0, lastSafe + 1).replace(/,\s*$/, "");
+  // Re-walk the trimmed slice to recompute the open stack.
+  inString = false;
+  escape = false;
+  const open: string[] = [];
+  for (let i = 0; i < trimmed.length; i++) {
+    const c = trimmed[i];
+    if (escape) { escape = false; continue; }
+    if (c === "\\") { escape = true; continue; }
+    if (inString) { if (c === '"') inString = false; continue; }
+    if (c === '"') { inString = true; continue; }
+    if (c === "{" || c === "[") open.push(c);
+    else if (c === "}" || c === "]") open.pop();
+  }
+  while (open.length) trimmed += open.pop() === "{" ? "}" : "]";
+  if (!trimmed) return top === "object" ? "{}" : "[]";
+  return trimmed;
 }
 
 export async function generateJson<T>(args: {
