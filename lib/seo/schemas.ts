@@ -1,261 +1,238 @@
-import { Type, type Schema } from "@google/genai";
+import type { JsonSchema } from "./glm";
 
-export const issueSchema: Schema = {
-  type: Type.OBJECT,
+export const issueSchema: JsonSchema = {
+  type: "object",
   properties: {
-    priority: { type: Type.STRING, enum: ["Critical", "High", "Medium", "Low"] },
-    category: { type: Type.STRING },
-    title: { type: Type.STRING },
-    description: { type: Type.STRING },
-    recommendation: { type: Type.STRING },
-    effort: { type: Type.STRING, enum: ["low", "medium", "high"] },
+    priority: { type: "string", enum: ["Critical", "High", "Medium", "Low"] },
+    category: { type: "string" },
+    title: { type: "string" },
+    description: { type: "string" },
+    recommendation: { type: "string" },
+    effort: { type: "string", enum: ["low", "medium", "high"] },
   },
   required: ["priority", "category", "title", "description", "recommendation"],
-  propertyOrdering: ["priority", "category", "title", "description", "recommendation", "effort"],
 };
 
-export const findingSchema: Schema = {
-  type: Type.OBJECT,
+export const findingSchema: JsonSchema = {
+  type: "object",
   properties: {
-    label: { type: Type.STRING },
-    status: { type: Type.STRING, enum: ["pass", "warn", "fail"] },
-    detail: { type: Type.STRING },
+    label: { type: "string" },
+    status: { type: "string", enum: ["pass", "warn", "fail"] },
+    detail: { type: "string" },
   },
   required: ["label", "status"],
-  propertyOrdering: ["label", "status", "detail"],
 };
 
-export const categoryReportSchema: Schema = {
-  type: Type.OBJECT,
+export const categoryReportSchema: JsonSchema = {
+  type: "object",
   properties: {
-    score: { type: Type.INTEGER },
-    status: { type: Type.STRING, enum: ["pass", "warn", "fail"] },
-    summary: { type: Type.STRING },
-    findings: { type: Type.ARRAY, items: findingSchema },
-    issues: { type: Type.ARRAY, items: issueSchema },
+    score: { type: "integer" },
+    status: { type: "string", enum: ["pass", "warn", "fail"] },
+    summary: { type: "string" },
+    findings: { type: "array", items: findingSchema },
+    issues: { type: "array", items: issueSchema },
   },
   required: ["score", "status", "summary", "findings", "issues"],
-  propertyOrdering: ["score", "status", "summary", "findings", "issues"],
 };
 
-export const eeatBreakdownSchema: Schema = {
-  type: Type.OBJECT,
+export const eeatBreakdownSchema: JsonSchema = {
+  type: "object",
   properties: {
     Experience: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        score: { type: Type.INTEGER },
-        signals: { type: Type.ARRAY, items: { type: Type.STRING } },
+        score: { type: "integer" },
+        signals: { type: "array", items: { type: "string" } },
       },
       required: ["score", "signals"],
-      propertyOrdering: ["score", "signals"],
     },
     Expertise: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        score: { type: Type.INTEGER },
-        signals: { type: Type.ARRAY, items: { type: Type.STRING } },
+        score: { type: "integer" },
+        signals: { type: "array", items: { type: "string" } },
       },
       required: ["score", "signals"],
-      propertyOrdering: ["score", "signals"],
     },
     Authoritativeness: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        score: { type: Type.INTEGER },
-        signals: { type: Type.ARRAY, items: { type: Type.STRING } },
+        score: { type: "integer" },
+        signals: { type: "array", items: { type: "string" } },
       },
       required: ["score", "signals"],
-      propertyOrdering: ["score", "signals"],
     },
     Trustworthiness: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        score: { type: Type.INTEGER },
-        signals: { type: Type.ARRAY, items: { type: Type.STRING } },
+        score: { type: "integer" },
+        signals: { type: "array", items: { type: "string" } },
       },
       required: ["score", "signals"],
-      propertyOrdering: ["score", "signals"],
     },
   },
   required: ["Experience", "Expertise", "Authoritativeness", "Trustworthiness"],
-  propertyOrdering: ["Experience", "Expertise", "Authoritativeness", "Trustworthiness"],
 };
 
-export const contentReportSchema: Schema = {
-  type: Type.OBJECT,
+export const contentReportSchema: JsonSchema = {
+  type: "object",
   properties: {
-    score: { type: Type.INTEGER },
-    status: { type: Type.STRING, enum: ["pass", "warn", "fail"] },
-    summary: { type: Type.STRING },
-    findings: { type: Type.ARRAY, items: findingSchema },
-    issues: { type: Type.ARRAY, items: issueSchema },
+    score: { type: "integer" },
+    status: { type: "string", enum: ["pass", "warn", "fail"] },
+    summary: { type: "string" },
+    findings: { type: "array", items: findingSchema },
+    issues: { type: "array", items: issueSchema },
     eeat: eeatBreakdownSchema,
-    aiCitationReadiness: { type: Type.INTEGER },
+    aiCitationReadiness: { type: "integer" },
   },
   required: ["score", "status", "summary", "findings", "issues", "eeat", "aiCitationReadiness"],
-  propertyOrdering: ["score", "status", "summary", "findings", "issues", "eeat", "aiCitationReadiness"],
 };
 
-export const schemaReportSchema: Schema = {
-  type: Type.OBJECT,
+export const schemaReportSchema: JsonSchema = {
+  type: "object",
   properties: {
-    score: { type: Type.INTEGER },
-    status: { type: Type.STRING, enum: ["pass", "warn", "fail"] },
-    summary: { type: Type.STRING },
-    findings: { type: Type.ARRAY, items: findingSchema },
-    issues: { type: Type.ARRAY, items: issueSchema },
-    detected: { type: Type.ARRAY, items: { type: Type.STRING } },
-    suggestions: { type: Type.ARRAY, items: { type: Type.STRING } },
+    score: { type: "integer" },
+    status: { type: "string", enum: ["pass", "warn", "fail"] },
+    summary: { type: "string" },
+    findings: { type: "array", items: findingSchema },
+    issues: { type: "array", items: issueSchema },
+    detected: { type: "array", items: { type: "string" } },
+    suggestions: { type: "array", items: { type: "string" } },
   },
   required: ["score", "status", "summary", "findings", "issues", "detected", "suggestions"],
-  propertyOrdering: ["score", "status", "summary", "findings", "issues", "detected", "suggestions"],
 };
 
-export const industryDetectionSchema: Schema = {
-  type: Type.OBJECT,
+export const industryDetectionSchema: JsonSchema = {
+  type: "object",
   properties: {
     industry: {
-      type: Type.STRING,
+      type: "string",
       enum: ["SaaS", "Local Service", "E-commerce", "Publisher", "Agency", "Other"],
     },
-    confidence: { type: Type.STRING, enum: ["high", "medium", "low"] },
-    signals: { type: Type.ARRAY, items: { type: Type.STRING } },
-    pageType: { type: Type.STRING },
+    confidence: { type: "string", enum: ["high", "medium", "low"] },
+    signals: { type: "array", items: { type: "string" } },
+    pageType: { type: "string" },
   },
   required: ["industry", "confidence", "signals", "pageType"],
-  propertyOrdering: ["industry", "confidence", "signals", "pageType"],
 };
 
-// Architecture report schema (marketingskills/site-architecture)
-const architectureNodeSchema: Schema = {
-  type: Type.OBJECT,
+const architectureNodeSchema: JsonSchema = {
+  type: "object",
   properties: {
-    label: { type: Type.STRING },
-    url: { type: Type.STRING },
-    level: { type: Type.INTEGER },
-    navZone: { type: Type.STRING, enum: ["header", "footer", "sidebar", "contextual", "orphan"] },
+    label: { type: "string" },
+    url: { type: "string" },
+    level: { type: "integer" },
+    navZone: { type: "string", enum: ["header", "footer", "sidebar", "contextual", "orphan"] },
     children: {
-      type: Type.ARRAY,
+      type: "array",
       items: {
-        type: Type.OBJECT,
+        type: "object",
         properties: {
-          label: { type: Type.STRING },
-          url: { type: Type.STRING },
-          level: { type: Type.INTEGER },
-          navZone: { type: Type.STRING, enum: ["header", "footer", "sidebar", "contextual", "orphan"] },
+          label: { type: "string" },
+          url: { type: "string" },
+          level: { type: "integer" },
+          navZone: { type: "string", enum: ["header", "footer", "sidebar", "contextual", "orphan"] },
         },
         required: ["label", "url", "level", "navZone"],
-        propertyOrdering: ["label", "url", "level", "navZone"],
       },
     },
   },
   required: ["label", "url", "level", "navZone"],
-  propertyOrdering: ["label", "url", "level", "navZone", "children"],
 };
 
-export const architectureReportSchema: Schema = {
-  type: Type.OBJECT,
+export const architectureReportSchema: JsonSchema = {
+  type: "object",
   properties: {
-    overallScore: { type: Type.INTEGER },
-    summary: { type: Type.STRING },
-    detectedHierarchy: { type: Type.ARRAY, items: architectureNodeSchema },
-    asciiTree: { type: Type.STRING },
-    mermaid: { type: Type.STRING },
+    overallScore: { type: "integer" },
+    summary: { type: "string" },
+    detectedHierarchy: { type: "array", items: architectureNodeSchema },
+    asciiTree: { type: "string" },
+    mermaid: { type: "string" },
     urlMap: {
-      type: Type.ARRAY,
+      type: "array",
       items: {
-        type: Type.OBJECT,
+        type: "object",
         properties: {
-          page: { type: Type.STRING },
-          url: { type: Type.STRING },
-          parent: { type: Type.STRING },
-          navLocation: { type: Type.STRING },
-          priority: { type: Type.STRING, enum: ["High", "Medium", "Low"] },
+          page: { type: "string" },
+          url: { type: "string" },
+          parent: { type: "string" },
+          navLocation: { type: "string" },
+          priority: { type: "string", enum: ["High", "Medium", "Low"] },
         },
         required: ["page", "url", "parent", "navLocation", "priority"],
-        propertyOrdering: ["page", "url", "parent", "navLocation", "priority"],
       },
     },
     navigation: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
         header: {
-          type: Type.OBJECT,
+          type: "object",
           properties: {
-            items: { type: Type.ARRAY, items: { type: Type.STRING } },
-            ctaLabel: { type: Type.STRING },
-            itemCount: { type: Type.INTEGER },
-            itemsWithinRule: { type: Type.BOOLEAN },
+            items: { type: "array", items: { type: "string" } },
+            ctaLabel: { type: "string" },
+            itemCount: { type: "integer" },
+            itemsWithinRule: { type: "boolean" },
           },
           required: ["items", "itemCount", "itemsWithinRule"],
-          propertyOrdering: ["items", "ctaLabel", "itemCount", "itemsWithinRule"],
         },
         footer: {
-          type: Type.OBJECT,
+          type: "object",
           properties: {
             columns: {
-              type: Type.ARRAY,
+              type: "array",
               items: {
-                type: Type.OBJECT,
+                type: "object",
                 properties: {
-                  title: { type: Type.STRING },
-                  links: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  title: { type: "string" },
+                  links: { type: "array", items: { type: "string" } },
                 },
                 required: ["title", "links"],
-                propertyOrdering: ["title", "links"],
               },
             },
           },
           required: ["columns"],
-          propertyOrdering: ["columns"],
         },
         breadcrumbs: {
-          type: Type.OBJECT,
+          type: "object",
           properties: {
-            present: { type: Type.BOOLEAN },
-            mirrorsUrl: { type: Type.BOOLEAN },
-            notes: { type: Type.STRING },
+            present: { type: "boolean" },
+            mirrorsUrl: { type: "boolean" },
+            notes: { type: "string" },
           },
           required: ["present", "mirrorsUrl", "notes"],
-          propertyOrdering: ["present", "mirrorsUrl", "notes"],
         },
       },
       required: ["header", "footer", "breadcrumbs"],
-      propertyOrdering: ["header", "footer", "breadcrumbs"],
     },
     internalLinking: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
         hubs: {
-          type: Type.ARRAY,
+          type: "array",
           items: {
-            type: Type.OBJECT,
+            type: "object",
             properties: {
-              hub: { type: Type.STRING },
-              spokes: { type: Type.ARRAY, items: { type: Type.STRING } },
+              hub: { type: "string" },
+              spokes: { type: "array", items: { type: "string" } },
             },
             required: ["hub", "spokes"],
-            propertyOrdering: ["hub", "spokes"],
           },
         },
-        orphanRisks: { type: Type.ARRAY, items: { type: Type.STRING } },
-        crossSectionOpportunities: { type: Type.ARRAY, items: { type: Type.STRING } },
-        linksPer1000WordsObserved: { type: Type.STRING },
+        orphanRisks: { type: "array", items: { type: "string" } },
+        crossSectionOpportunities: { type: "array", items: { type: "string" } },
+        linksPer1000WordsObserved: { type: "string" },
       },
       required: ["hubs", "orphanRisks", "crossSectionOpportunities", "linksPer1000WordsObserved"],
-      propertyOrdering: ["hubs", "orphanRisks", "crossSectionOpportunities", "linksPer1000WordsObserved"],
     },
     urlAudit: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        findings: { type: Type.ARRAY, items: findingSchema },
-        issues: { type: Type.ARRAY, items: issueSchema },
+        findings: { type: "array", items: findingSchema },
+        issues: { type: "array", items: issueSchema },
       },
       required: ["findings", "issues"],
-      propertyOrdering: ["findings", "issues"],
     },
-    issues: { type: Type.ARRAY, items: issueSchema },
+    issues: { type: "array", items: issueSchema },
   },
   required: [
     "overallScore",
@@ -269,149 +246,125 @@ export const architectureReportSchema: Schema = {
     "urlAudit",
     "issues",
   ],
-  propertyOrdering: [
-    "overallScore",
-    "summary",
-    "detectedHierarchy",
-    "asciiTree",
-    "mermaid",
-    "urlMap",
-    "navigation",
-    "internalLinking",
-    "urlAudit",
-    "issues",
-  ],
 };
 
-// Programmatic SEO report schema (marketingskills/programmatic-seo)
-export const programmaticReportSchema: Schema = {
-  type: Type.OBJECT,
+export const programmaticReportSchema: JsonSchema = {
+  type: "object",
   properties: {
-    recommendedPlaybook: { type: Type.STRING },
+    recommendedPlaybook: { type: "string" },
     alternativePlaybooks: {
-      type: Type.ARRAY,
+      type: "array",
       items: {
-        type: Type.OBJECT,
-        properties: { name: { type: Type.STRING }, rationale: { type: Type.STRING } },
+        type: "object",
+        properties: { name: { type: "string" }, rationale: { type: "string" } },
         required: ["name", "rationale"],
-        propertyOrdering: ["name", "rationale"],
       },
     },
     patternAnalysis: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        keywordPattern: { type: Type.STRING },
+        keywordPattern: { type: "string" },
         variables: {
-          type: Type.ARRAY,
+          type: "array",
           items: {
-            type: Type.OBJECT,
+            type: "object",
             properties: {
-              name: { type: Type.STRING },
-              example: { type: Type.STRING },
-              sourceTier: { type: Type.INTEGER },
+              name: { type: "string" },
+              example: { type: "string" },
+              sourceTier: { type: "integer" },
             },
             required: ["name", "example", "sourceTier"],
-            propertyOrdering: ["name", "example", "sourceTier"],
           },
         },
-        estimatedUniqueCombinations: { type: Type.STRING },
-        searchIntentSummary: { type: Type.STRING },
+        estimatedUniqueCombinations: { type: "string" },
+        searchIntentSummary: { type: "string" },
       },
       required: ["keywordPattern", "variables", "estimatedUniqueCombinations", "searchIntentSummary"],
-      propertyOrdering: ["keywordPattern", "variables", "estimatedUniqueCombinations", "searchIntentSummary"],
     },
     pageTemplate: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        urlPattern: { type: Type.STRING },
-        titleTemplate: { type: Type.STRING },
-        metaDescriptionTemplate: { type: Type.STRING },
-        h1Template: { type: Type.STRING },
+        urlPattern: { type: "string" },
+        titleTemplate: { type: "string" },
+        metaDescriptionTemplate: { type: "string" },
+        h1Template: { type: "string" },
         sections: {
-          type: Type.ARRAY,
+          type: "array",
           items: {
-            type: Type.OBJECT,
+            type: "object",
             properties: {
-              heading: { type: Type.STRING },
-              purpose: { type: Type.STRING },
-              uniquenessSource: { type: Type.STRING },
+              heading: { type: "string" },
+              purpose: { type: "string" },
+              uniquenessSource: { type: "string" },
             },
             required: ["heading", "purpose", "uniquenessSource"],
-            propertyOrdering: ["heading", "purpose", "uniquenessSource"],
           },
         },
-        schemaJsonLd: { type: Type.STRING },
+        schemaJsonLd: { type: "string" },
         sampleRenderedPage: {
-          type: Type.OBJECT,
+          type: "object",
           properties: {
-            url: { type: Type.STRING },
-            title: { type: Type.STRING },
-            metaDescription: { type: Type.STRING },
-            h1: { type: Type.STRING },
+            url: { type: "string" },
+            title: { type: "string" },
+            metaDescription: { type: "string" },
+            h1: { type: "string" },
           },
           required: ["url", "title", "metaDescription", "h1"],
-          propertyOrdering: ["url", "title", "metaDescription", "h1"],
         },
       },
       required: ["urlPattern", "titleTemplate", "metaDescriptionTemplate", "h1Template", "sections", "schemaJsonLd", "sampleRenderedPage"],
-      propertyOrdering: ["urlPattern", "titleTemplate", "metaDescriptionTemplate", "h1Template", "sections", "schemaJsonLd", "sampleRenderedPage"],
     },
     internalLinkingPlan: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        hubPage: { type: Type.STRING },
-        spokePattern: { type: Type.STRING },
-        crossLinkRules: { type: Type.ARRAY, items: { type: Type.STRING } },
+        hubPage: { type: "string" },
+        spokePattern: { type: "string" },
+        crossLinkRules: { type: "array", items: { type: "string" } },
       },
       required: ["hubPage", "spokePattern", "crossLinkRules"],
-      propertyOrdering: ["hubPage", "spokePattern", "crossLinkRules"],
     },
     indexationStrategy: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        sitemapStrategy: { type: Type.STRING },
-        noindexCriteria: { type: Type.STRING },
-        crawlBudgetNotes: { type: Type.STRING },
+        sitemapStrategy: { type: "string" },
+        noindexCriteria: { type: "string" },
+        crawlBudgetNotes: { type: "string" },
       },
       required: ["sitemapStrategy", "noindexCriteria", "crawlBudgetNotes"],
-      propertyOrdering: ["sitemapStrategy", "noindexCriteria", "crawlBudgetNotes"],
     },
     dataRequirements: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        proprietaryDataNeeded: { type: Type.ARRAY, items: { type: Type.STRING } },
-        publicDataAcceptable: { type: Type.ARRAY, items: { type: Type.STRING } },
-        refreshCadence: { type: Type.STRING },
+        proprietaryDataNeeded: { type: "array", items: { type: "string" } },
+        publicDataAcceptable: { type: "array", items: { type: "string" } },
+        refreshCadence: { type: "string" },
       },
       required: ["proprietaryDataNeeded", "publicDataAcceptable", "refreshCadence"],
-      propertyOrdering: ["proprietaryDataNeeded", "publicDataAcceptable", "refreshCadence"],
     },
-    thinContentRiskScore: { type: Type.INTEGER },
+    thinContentRiskScore: { type: "integer" },
     qualityChecklist: {
-      type: Type.ARRAY,
+      type: "array",
       items: {
-        type: Type.OBJECT,
+        type: "object",
         properties: {
-          check: { type: Type.STRING },
-          status: { type: Type.STRING, enum: ["pass", "warn", "fail"] },
-          detail: { type: Type.STRING },
+          check: { type: "string" },
+          status: { type: "string", enum: ["pass", "warn", "fail"] },
+          detail: { type: "string" },
         },
         required: ["check", "status"],
-        propertyOrdering: ["check", "status", "detail"],
       },
     },
     estimatedPageCount: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        realistic: { type: Type.INTEGER },
-        aspirational: { type: Type.INTEGER },
-        rationale: { type: Type.STRING },
+        realistic: { type: "integer" },
+        aspirational: { type: "integer" },
+        rationale: { type: "string" },
       },
       required: ["realistic", "aspirational", "rationale"],
-      propertyOrdering: ["realistic", "aspirational", "rationale"],
     },
-    issues: { type: Type.ARRAY, items: issueSchema },
-    summary: { type: Type.STRING },
+    issues: { type: "array", items: issueSchema },
+    summary: { type: "string" },
   },
   required: [
     "recommendedPlaybook",
@@ -427,41 +380,25 @@ export const programmaticReportSchema: Schema = {
     "issues",
     "summary",
   ],
-  propertyOrdering: [
-    "recommendedPlaybook",
-    "alternativePlaybooks",
-    "patternAnalysis",
-    "pageTemplate",
-    "internalLinkingPlan",
-    "indexationStrategy",
-    "dataRequirements",
-    "thinContentRiskScore",
-    "qualityChecklist",
-    "estimatedPageCount",
-    "issues",
-    "summary",
-  ],
 };
 
-export const pageReportSchema: Schema = {
-  type: Type.OBJECT,
+export const pageReportSchema: JsonSchema = {
+  type: "object",
   properties: {
-    summary: { type: Type.STRING },
+    summary: { type: "string" },
     scores: {
-      type: Type.OBJECT,
+      type: "object",
       properties: {
-        onPage: { type: Type.INTEGER },
-        content: { type: Type.INTEGER },
-        technical: { type: Type.INTEGER },
-        schema: { type: Type.INTEGER },
-        images: { type: Type.INTEGER },
+        onPage: { type: "integer" },
+        content: { type: "integer" },
+        technical: { type: "integer" },
+        schema: { type: "integer" },
+        images: { type: "integer" },
       },
       required: ["onPage", "content", "technical", "schema", "images"],
-      propertyOrdering: ["onPage", "content", "technical", "schema", "images"],
     },
-    issues: { type: Type.ARRAY, items: issueSchema },
-    schemaSuggestions: { type: Type.ARRAY, items: { type: Type.STRING } },
+    issues: { type: "array", items: issueSchema },
+    schemaSuggestions: { type: "array", items: { type: "string" } },
   },
   required: ["summary", "scores", "issues", "schemaSuggestions"],
-  propertyOrdering: ["summary", "scores", "issues", "schemaSuggestions"],
 };

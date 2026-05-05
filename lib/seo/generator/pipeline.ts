@@ -3,11 +3,11 @@
 //   - Bright Data MCP SERP scraping → user-supplied URLs (or competitor links
 //     pulled from the captured page later)
 //   - Bright Data MCP page fetch → existing fetchAndParse + cheerio
-//   - OpenAI text-embedding-3-small + FAISS → Gemini embeddings + cosine top-k
-//   - LangChain OpenAI chat → Gemini generateText (gemini-3.1-pro)
+//   - OpenAI text-embedding-3-small + FAISS → GLM embeddings + cosine top-k
+//   - LangChain OpenAI chat → GLM generateText (glm-5.1)
 // Streams progress events so the UI mirrors the SSE pattern used by /rewrite.
 
-import { embedTexts, generateText } from "../gemini";
+import { embedTexts, generateText } from "../glm";
 import { fetchAndParse } from "../parse-html";
 import { chunkText } from "./chunker";
 import { topK } from "./vector-search";

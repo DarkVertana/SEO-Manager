@@ -7,7 +7,7 @@
 // Where marketingskills delegates to other skills (e.g. ai-seo from seo-audit), we
 // follow the same delegation in the parent orchestrator (lib/seo/audit.ts).
 
-import { generateJson } from "./gemini";
+import { generateJson } from "./glm";
 import {
   architectureReportSchema,
   categoryReportSchema,

@@ -1,29 +1,31 @@
 // Section rewriter:
 //   1. Screenshot the section (Playwright clip).
 //   2. Extract every visible text node from that section subtree.
-//   3. Send screenshot + JSON of texts + user instruction to Gemini Vision.
+//   3. Send screenshot + JSON of texts + user instruction to GLM (vision).
 //   4. Apply rewritten text in place — only `data` of text nodes changes.
 
 import * as cheerio from "cheerio";
 import type { AnyNode } from "domhandler";
-import { Type, type Schema } from "@google/genai";
-import { getGemini, GEMINI_MODEL } from "@/lib/seo/gemini";
+import {
+  generateJsonMultimodal,
+  type ChatMessageContentPart,
+  type JsonSchema,
+} from "@/lib/seo/glm";
 
 const SKIP_TAGS = new Set([
   "script", "style", "noscript", "code", "pre", "svg", "math", "template", "meta", "link",
 ]);
 const MIN_TEXT_LENGTH = 2;
 
-const REWRITE_SCHEMA: Schema = {
-  type: Type.ARRAY,
+const REWRITE_SCHEMA: JsonSchema = {
+  type: "array",
   items: {
-    type: Type.OBJECT,
+    type: "object",
     properties: {
-      id: { type: Type.INTEGER },
-      text: { type: Type.STRING },
+      id: { type: "integer" },
+      text: { type: "string" },
     },
     required: ["id", "text"],
-    propertyOrdering: ["id", "text"],
   },
 };
 
@@ -144,31 +146,25 @@ export async function rewriteSection(args: {
   const screenshot = args.screenshot ?? null;
   const payload = nodes.map((n) => ({ id: n.id, text: n.trimmed }));
 
-  const ai = getGemini();
-  const userParts: ({ text: string } | { inlineData: { mimeType: string; data: string } })[] = [];
+  const parts: ChatMessageContentPart[] = [];
   if (screenshot) {
-    userParts.push({
-      inlineData: { mimeType: "image/png", data: screenshot.toString("base64") },
+    parts.push({
+      type: "image_url",
+      image_url: { url: `data:image/png;base64,${screenshot.toString("base64")}` },
     });
   }
-  userParts.push({
+  parts.push({
+    type: "text",
     text: `User instruction: ${args.prompt}\n\nText snippets in this section (return all with rewritten text):\n${JSON.stringify(payload)}`,
   });
 
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: [{ role: "user", parts: userParts }],
-    config: {
-      systemInstruction: SYSTEM,
-      responseMimeType: "application/json",
-      responseSchema: REWRITE_SCHEMA,
-      temperature: 0.4,
-    },
+  const result = await generateJsonMultimodal<{ id: number; text: string }[]>({
+    systemInstruction: SYSTEM,
+    parts,
+    schema: REWRITE_SCHEMA,
+    temperature: 0.4,
   });
 
-  const raw = response.text;
-  if (!raw) throw new Error("Empty response from rewrite engine.");
-  const result = JSON.parse(raw) as { id: number; text: string }[];
   const map = new Map(result.map((r) => [r.id, r.text ?? ""]));
 
   let changed = 0;
