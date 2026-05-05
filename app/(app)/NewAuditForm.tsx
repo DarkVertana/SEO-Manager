@@ -113,7 +113,7 @@ export default function NewAuditForm({
           role="tablist"
           aria-label="SEO skill"
         >
-          {(["audit", "page", "architecture", "programmatic", "rewrite"] as const).map((c) => (
+          {(["audit", "page", "architecture", "programmatic"] as const).map((c) => (
             <button
               key={c}
               type="button"
