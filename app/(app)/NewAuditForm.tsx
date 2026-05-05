@@ -116,10 +116,20 @@ export default function NewAuditForm({
     const decoder = new TextDecoder();
     let buffer = "";
     let initId: string | null = null;
-    let completeId: string | null = null;
     let streamError: string | null = null;
 
-    while (true) {
+    // Hard-navigate as soon as we know the destination id. Using
+    // window.location.assign bypasses Next.js client-side routing —
+    // router.push silently no-ops in some Vercel edge cases when a stream
+    // is still tied up. assign() always works and the destination page
+    // (audit detail) handles the in-progress polling fallback if the
+    // record is still being written.
+    const goto = (id: string) => {
+      try { reader.cancel().catch(() => {}); } catch { /* ignore */ }
+      window.location.assign(`/audits/${id}`);
+    };
+
+    streamLoop: while (true) {
       const { value, done } = await reader.read();
       if (value) buffer += decoder.decode(value, { stream: true });
       let nl: number;
@@ -150,20 +160,27 @@ export default function NewAuditForm({
             ),
           );
         } else if (event.type === "complete") {
-          completeId = event.id;
+          // Don't wait for stream close — leave for the report page now.
+          goto(event.id);
+          return;
         } else if (event.type === "error") {
           streamError = event.error;
           if (event.id) initId = initId ?? event.id;
+          break streamLoop;
         }
       }
       if (done) break;
     }
 
-    if (streamError) throw new Error(streamError);
-    const navigateId = completeId ?? initId;
-    if (!navigateId) throw new Error("Audit finished without saving a record.");
-    router.push(`/audits/${navigateId}`);
-    router.refresh();
+    if (streamError) {
+      // We have an init id even on failure — the user can revisit it from
+      // /history later. Surface the error in the modal and stay put.
+      throw new Error(streamError);
+    }
+    if (!initId) throw new Error("Audit finished without saving a record.");
+    // Stream closed without a complete event (Vercel buffer / timeout). The
+    // record exists; the audit page will poll-refresh until db.update lands.
+    goto(initId);
   }
 
   async function submit() {

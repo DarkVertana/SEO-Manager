@@ -60,8 +60,10 @@ function getKey(): string {
 // The audit pipeline fans out 7 agents in parallel (see lib/seo/audit.ts);
 // architecture/programmatic add more. Without throttling, z.ai returns
 // 429 "Rate limit reached for requests" (code 1302). Limit live in-flight
-// chat calls to GLM_CONCURRENCY (default 3) and retry on 429 with backoff.
-const CONCURRENCY = Math.max(1, Number(process.env.GLM_CONCURRENCY ?? 3));
+// chat calls to GLM_CONCURRENCY (default 5) and retry on 429 with backoff.
+// 5 in-flight finishes the 7-agent audit in ~2 batches; if 429 retries
+// dominate, drop to 3 via env.
+const CONCURRENCY = Math.max(1, Number(process.env.GLM_CONCURRENCY ?? 5));
 const MAX_RETRIES = Math.max(0, Number(process.env.GLM_MAX_RETRIES ?? 5));
 
 let inFlight = 0;
