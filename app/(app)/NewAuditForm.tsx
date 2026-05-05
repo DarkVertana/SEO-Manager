@@ -6,13 +6,14 @@ import UpgradeDialog, { type PlanCard } from "./UpgradeDialog";
 
 export type SkillId = "audit" | "page" | "architecture" | "programmatic" | "rewrite";
 
-type StepStatus = "pending" | "running" | "done" | "failed";
+type StepStatus = "pending" | "queued" | "running" | "done" | "failed";
 type StepRow = { index: number; label: string; status: StepStatus; error?: string; durationMs?: number };
 
 // Shape of an event line emitted by /api/seo/audit (NDJSON stream). Mirrors
 // AuditEvent in lib/seo/audit.ts plus the wrapper events the route adds.
 type AuditStreamEvent =
   | { type: "start"; total: number; steps: { index: number; label: string }[] }
+  | { type: "step"; index: number; label: string; status: "queued" }
   | { type: "step"; index: number; label: string; status: "running" }
   | { type: "step"; index: number; label: string; status: "done"; durationMs: number }
   | { type: "step"; index: number; label: string; status: "failed"; error: string; durationMs: number }
@@ -127,7 +128,10 @@ export default function NewAuditForm({
                     ...row,
                     status: event.status,
                     error: event.status === "failed" ? event.error : undefined,
-                    durationMs: event.status === "running" ? row.durationMs : event.durationMs,
+                    durationMs:
+                      event.status === "done" || event.status === "failed"
+                        ? event.durationMs
+                        : row.durationMs,
                   }
                 : row,
             ),
@@ -288,9 +292,11 @@ export default function NewAuditForm({
           <ol className="flex flex-col">
             {steps.map((s) => {
               const num = s.index.toString().padStart(2, "0");
+              const isQueued = s.status === "queued";
               const isRunning = s.status === "running";
               const isDone = s.status === "done";
               const isFailed = s.status === "failed";
+              const isActive = isQueued || isRunning;
               return (
                 <li
                   key={s.index}
@@ -305,17 +311,15 @@ export default function NewAuditForm({
                           ? "bg-foreground"
                           : isRunning
                             ? "animate-pulse bg-foreground"
-                            : "border border-hairline"
+                            : isQueued
+                              ? "bg-hairline"
+                              : "border border-hairline"
                     }`}
                     aria-hidden
                   />
                   <span
                     className={`flex-1 text-sm transition-colors ${
-                      isDone || isFailed
-                        ? "text-foreground"
-                        : isRunning
-                          ? "text-foreground"
-                          : "text-muted"
+                      isDone || isFailed || isActive ? "text-foreground" : "text-muted"
                     }`}
                   >
                     {s.label}
@@ -324,6 +328,7 @@ export default function NewAuditForm({
                     )}
                   </span>
                   <span className="font-mono text-[10px] text-muted">
+                    {isQueued && "queued…"}
                     {isRunning && "running…"}
                     {isDone && s.durationMs != null && `${(s.durationMs / 1000).toFixed(1)}s`}
                     {isFailed && "failed"}

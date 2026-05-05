@@ -18,6 +18,7 @@ import {
   runTechnical,
   siteTypeChecklist,
 } from "./agents";
+import { withStepContext } from "./glm";
 import { fetchAndParse, fetchRobots, fetchSitemap } from "./parse-html";
 import { HEALTH_SCORE_WEIGHTS, type HealthCategory, type ProgrammaticPlaybook } from "./references";
 import type { ArchitectureReport, AuditReport, CategoryScores, Issue, PageReport, ProgrammaticReport, Priority } from "./types";
@@ -48,8 +49,15 @@ function buildActionPlan(issues: Issue[]): { priority: Priority; items: Issue[] 
 // Lifecycle event emitted by runAudit so the API can stream per-agent
 // progress back to the UI. `index` is 1-based across the full step list
 // (Fetch + Industry + the 7 category agents = 9 steps).
+//
+// Lifecycle: queued → running → done|failed.
+//   queued  — wrapper started, agent is waiting on the GLM semaphore
+//   running — semaphore acquired, request to z.ai is in flight
+//   done    — agent returned successfully
+//   failed  — agent threw (already retried internally)
 export type AuditEvent =
   | { type: "start"; total: number; steps: { index: number; label: string }[] }
+  | { type: "step"; index: number; label: string; status: "queued" }
   | { type: "step"; index: number; label: string; status: "running" }
   | { type: "step"; index: number; label: string; status: "done"; durationMs: number }
   | { type: "step"; index: number; label: string; status: "failed"; error: string; durationMs: number };
@@ -72,10 +80,16 @@ async function trackStep<T>(
   emit: ((e: AuditEvent) => void) | undefined,
   fn: () => Promise<T>,
 ): Promise<{ ok: true; value: T } | { ok: false; reason: unknown }> {
-  emit?.({ type: "step", index, label, status: "running" });
-  const startedAt = Date.now();
+  emit?.({ type: "step", index, label, status: "queued" });
+  let startedAt = Date.now();
   try {
-    const value = await fn();
+    const value = await withStepContext(
+      () => {
+        startedAt = Date.now();
+        emit?.({ type: "step", index, label, status: "running" });
+      },
+      fn,
+    );
     emit?.({ type: "step", index, label, status: "done", durationMs: Date.now() - startedAt });
     return { ok: true, value };
   } catch (reason) {
@@ -111,24 +125,26 @@ export async function runAudit(
   if (!industryStep.ok) throw industryStep.reason;
   const industry = industryStep.value;
 
-  // Sequential subagent delegation. We previously kicked these off in parallel
-  // via Promise.allSettled, but trackStep emits "running" before its inner fn
-  // queues on the GLM concurrency semaphore — so the UI saw all 7 rows flip
-  // to running at once. With z.ai's coding-plan rate limit we already
-  // serialize at the GLM layer (GLM_CONCURRENCY=1 by default), so running the
-  // wrappers sequentially has the same wall-clock cost while letting each
-  // step's status accurately reflect what's executing right now.
+  // Parallel subagent delegation, gated by the GLM client's concurrency
+  // semaphore. trackStep emits "queued" immediately, then "running" only
+  // when the inner chat() call actually acquires the semaphore — so the UI
+  // animates step-by-step even though all 7 wrappers start together. This
+  // keeps wall-clock under the 300s Vercel hobby cap (sequential blew past
+  // it on heavy pages) while preserving the one-at-a-time visual cadence.
   type StepResult<T> = { ok: true; value: T } | { ok: false; reason: unknown };
-  const technicalRes = await trackStep(3, AUDIT_STEPS[2], emit, () => runTechnical({ parsed, robots, sitemap }));
-  const contentRes = await trackStep(4, AUDIT_STEPS[3], emit, () => runContent(parsed));
-  const schemaRes = await trackStep(5, AUDIT_STEPS[4], emit, () => runSchema(parsed));
-  const onPageRes = await trackStep(6, AUDIT_STEPS[5], emit, () => runOnPage(parsed));
-  const performanceRes = await trackStep(7, AUDIT_STEPS[6], emit, () => runPerformance(parsed));
-  const aiSearchRes = await trackStep(8, AUDIT_STEPS[7], emit, () => runGeo({ parsed, robots }));
-  const imagesRes = await trackStep(9, AUDIT_STEPS[8], emit, () => runImages(parsed));
-  const settled: StepResult<unknown>[] = [
-    technicalRes, contentRes, schemaRes, onPageRes, performanceRes, aiSearchRes, imagesRes,
-  ];
+  const settled = (await Promise.allSettled([
+    trackStep(3, AUDIT_STEPS[2], emit, () => runTechnical({ parsed, robots, sitemap })),
+    trackStep(4, AUDIT_STEPS[3], emit, () => runContent(parsed)),
+    trackStep(5, AUDIT_STEPS[4], emit, () => runSchema(parsed)),
+    trackStep(6, AUDIT_STEPS[5], emit, () => runOnPage(parsed)),
+    trackStep(7, AUDIT_STEPS[6], emit, () => runPerformance(parsed)),
+    trackStep(8, AUDIT_STEPS[7], emit, () => runGeo({ parsed, robots })),
+    trackStep(9, AUDIT_STEPS[8], emit, () => runImages(parsed)),
+  ])).map((r): StepResult<unknown> =>
+    r.status === "fulfilled"
+      ? r.value
+      : { ok: false, reason: r.reason },
+  );
   const labels = ["technical", "content", "schema", "onPage", "performance", "aiSearch", "images"] as const;
   const placeholder = (label: string) => ({
     score: 0,

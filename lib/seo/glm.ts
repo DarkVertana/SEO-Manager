@@ -4,6 +4,23 @@
 // same shape as the prior @google/genai integration so callers do not need
 // to change.
 
+import { AsyncLocalStorage } from "node:async_hooks";
+
+// Per-call context lets a caller (e.g. the audit trackStep) run an agent
+// inside withStepContext({ onStart }) and be notified when this client has
+// actually acquired the GLM semaphore and is about to issue its first
+// request — i.e. the moment an agent is genuinely "running" rather than
+// just queued behind another in-flight call. Without this, the UI would
+// flip every parallel agent to "running…" instantly even when only one was
+// actually executing.
+const stepCtx = new AsyncLocalStorage<{ onStart?: () => void }>();
+export function withStepContext<T>(
+  onStart: (() => void) | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return stepCtx.run({ onStart }, fn);
+}
+
 // Defaults to the GLM Coding Plan endpoint, which is billed against an active
 // coding subscription rather than the pay-per-token PaaS balance. Override
 // with ZAI_BASE_URL=https://api.z.ai/api/paas/v4 to use the pay-as-you-go API.
@@ -43,8 +60,8 @@ function getKey(): string {
 // The audit pipeline fans out 7 agents in parallel (see lib/seo/audit.ts);
 // architecture/programmatic add more. Without throttling, z.ai returns
 // 429 "Rate limit reached for requests" (code 1302). Limit live in-flight
-// chat calls to GLM_CONCURRENCY (default 2) and retry on 429 with backoff.
-const CONCURRENCY = Math.max(1, Number(process.env.GLM_CONCURRENCY ?? 1));
+// chat calls to GLM_CONCURRENCY (default 3) and retry on 429 with backoff.
+const CONCURRENCY = Math.max(1, Number(process.env.GLM_CONCURRENCY ?? 3));
 const MAX_RETRIES = Math.max(0, Number(process.env.GLM_MAX_RETRIES ?? 5));
 
 let inFlight = 0;
@@ -78,7 +95,7 @@ function sleep(ms: number): Promise<void> {
 const THINKING_ENABLED = process.env.GLM_THINKING === "enabled";
 // Hard cap on completion tokens so a single call cannot eat the entire
 // function budget. Schemas top out around ~2.5k tokens of output.
-const DEFAULT_MAX_TOKENS = Math.max(256, Number(process.env.GLM_MAX_TOKENS ?? 4000));
+const DEFAULT_MAX_TOKENS = Math.max(256, Number(process.env.GLM_MAX_TOKENS ?? 2500));
 
 async function chat(args: {
   messages: ChatMessage[];
@@ -89,6 +106,14 @@ async function chat(args: {
 }): Promise<string> {
   await acquire();
   try {
+    // Notify the caller that this step is now genuinely in flight (semaphore
+    // acquired, request about to leave). Fire only on the first attempt so
+    // retries don't re-emit "running".
+    const ctx = stepCtx.getStore();
+    if (ctx?.onStart) {
+      ctx.onStart();
+      ctx.onStart = undefined;
+    }
     let attempt = 0;
     while (true) {
       const res = await fetch(`${BASE_URL}/chat/completions`, {
