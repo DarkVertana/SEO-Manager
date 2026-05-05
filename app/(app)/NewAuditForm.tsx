@@ -48,13 +48,24 @@ export default function NewAuditForm({
   const [quotaMessage, setQuotaMessage] = useState<string | null>(null);
 
   // 402 = Payment Required = our quota gate fired. Open the upgrade popup
-  // instead of showing the inline error pill.
+  // instead of showing the inline error pill. For other failures, surface the
+  // server's error message — falling back to the raw response text + status so
+  // we never show an opaque "Request failed" when the function times out and
+  // returns HTML/empty body.
   async function handleResponse(res: Response): Promise<{ ok: boolean; data: { error?: string; id?: string } }> {
-    const data = (await res.json().catch(() => ({}))) as { error?: string; id?: string };
+    const raw = await res.text();
+    let data: { error?: string; id?: string } = {};
+    try { data = raw ? (JSON.parse(raw) as { error?: string; id?: string }) : {}; } catch { /* non-JSON body */ }
     if (res.status === 402 && plans && plans.length > 0) {
       setQuotaMessage(data.error ?? "You've hit your monthly limit.");
       setQuotaOpen(true);
       return { ok: false, data };
+    }
+    if (!res.ok && !data.error) {
+      const snippet = raw.slice(0, 240).trim();
+      if (res.status === 504) data.error = "The audit took too long and timed out. Please try again — partial reruns are usually faster.";
+      else if (res.status >= 500) data.error = `Server error (${res.status})${snippet ? `: ${snippet}` : ""}`;
+      else data.error = `Request failed (${res.status})${snippet ? `: ${snippet}` : ""}`;
     }
     return { ok: res.ok, data };
   }

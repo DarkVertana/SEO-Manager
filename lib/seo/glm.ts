@@ -44,7 +44,7 @@ function getKey(): string {
 // architecture/programmatic add more. Without throttling, z.ai returns
 // 429 "Rate limit reached for requests" (code 1302). Limit live in-flight
 // chat calls to GLM_CONCURRENCY (default 2) and retry on 429 with backoff.
-const CONCURRENCY = Math.max(1, Number(process.env.GLM_CONCURRENCY ?? 2));
+const CONCURRENCY = Math.max(1, Number(process.env.GLM_CONCURRENCY ?? 1));
 const MAX_RETRIES = Math.max(0, Number(process.env.GLM_MAX_RETRIES ?? 5));
 
 let inFlight = 0;

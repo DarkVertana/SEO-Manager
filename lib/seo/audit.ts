@@ -55,8 +55,11 @@ export async function runAudit(url: string): Promise<AuditReport> {
   // contextualize prompts (and surface to the user).
   const industry = await detectIndustry(parsed);
 
-  // Parallel subagent delegation (skills/seo-audit/SKILL.md step 4)
-  const [technical, content, schema, onPage, performance, aiSearch, images] = await Promise.all([
+  // Parallel subagent delegation (skills/seo-audit/SKILL.md step 4).
+  // allSettled so a single agent failing (rate limit, malformed JSON, timeout)
+  // degrades that one category to a placeholder instead of nuking the whole
+  // audit. We log the rejection reason so it surfaces in Vercel function logs.
+  const settled = await Promise.allSettled([
     runTechnical({ parsed, robots, sitemap }),
     runContent(parsed),
     runSchema(parsed),
@@ -65,6 +68,42 @@ export async function runAudit(url: string): Promise<AuditReport> {
     runGeo({ parsed, robots }),
     runImages(parsed),
   ]);
+  const labels = ["technical", "content", "schema", "onPage", "performance", "aiSearch", "images"] as const;
+  const placeholder = (label: string) => ({
+    score: 0,
+    status: "warn" as const,
+    summary: `${label} agent failed to complete. Re-run the audit if this persists.`,
+    findings: [],
+    issues: [],
+  });
+  const contentPlaceholder = () => ({
+    ...placeholder("content"),
+    eeat: {
+      Experience: { score: 0, signals: [] },
+      Expertise: { score: 0, signals: [] },
+      Authoritativeness: { score: 0, signals: [] },
+      Trustworthiness: { score: 0, signals: [] },
+    },
+    aiCitationReadiness: 0,
+  });
+  const schemaPlaceholder = () => ({
+    ...placeholder("schema"),
+    detected: [],
+    suggestions: [],
+  });
+  const unwrap = <T,>(idx: number, fallback: T): T => {
+    const r = settled[idx];
+    if (r.status === "fulfilled") return r.value as T;
+    console.error(`[audit] ${labels[idx]} agent failed:`, r.reason);
+    return fallback;
+  };
+  const technical = unwrap(0, placeholder("technical"));
+  const content = unwrap(1, contentPlaceholder());
+  const schema = unwrap(2, schemaPlaceholder());
+  const onPage = unwrap(3, placeholder("onPage"));
+  const performance = unwrap(4, placeholder("performance"));
+  const aiSearch = unwrap(5, placeholder("aiSearch"));
+  const images = unwrap(6, placeholder("images"));
 
   const scores: CategoryScores = {
     technical: clamp(technical.score),
