@@ -3,22 +3,23 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import UpgradeDialog, { type PlanCard } from "./UpgradeDialog";
+import AuditProgressModal, { type ProgressStep } from "./AuditProgressModal";
 
 export type SkillId = "audit" | "page" | "architecture" | "programmatic" | "rewrite";
 
-type StepStatus = "pending" | "queued" | "running" | "done" | "failed";
-type StepRow = { index: number; label: string; status: StepStatus; error?: string; durationMs?: number };
-
-// Shape of an event line emitted by /api/seo/audit (NDJSON stream). Mirrors
-// AuditEvent in lib/seo/audit.ts plus the wrapper events the route adds.
+// Shape of an event line emitted by the streaming routes. Mirrors AuditEvent
+// in lib/seo/audit.ts plus the wrapper events the route adds (init/complete/
+// error all carry the pre-allocated record id, so the form can navigate even
+// if the connection drops before "complete" arrives).
 type AuditStreamEvent =
+  | { type: "init"; id: string }
   | { type: "start"; total: number; steps: { index: number; label: string }[] }
   | { type: "step"; index: number; label: string; status: "queued" }
   | { type: "step"; index: number; label: string; status: "running" }
   | { type: "step"; index: number; label: string; status: "done"; durationMs: number }
   | { type: "step"; index: number; label: string; status: "failed"; error: string; durationMs: number }
   | { type: "complete"; id: string }
-  | { type: "error"; error: string };
+  | { type: "error"; error: string; id?: string };
 
 const PLAYBOOKS = [
   "Templates",
@@ -60,7 +61,11 @@ export default function NewAuditForm({
   const [error, setError] = useState<string | null>(null);
   const [quotaOpen, setQuotaOpen] = useState(false);
   const [quotaMessage, setQuotaMessage] = useState<string | null>(null);
-  const [steps, setSteps] = useState<StepRow[]>([]);
+  const [steps, setSteps] = useState<ProgressStep[]>([]);
+  const [progressOpen, setProgressOpen] = useState(false);
+  const [progressUrl, setProgressUrl] = useState("");
+  const [progressSkill, setProgressSkill] = useState<SkillId>("audit");
+  const [progressError, setProgressError] = useState<string | null>(null);
 
   // 402 = Payment Required = our quota gate fired. Open the upgrade popup
   // instead of showing the inline error pill. For other failures, surface the
@@ -85,10 +90,15 @@ export default function NewAuditForm({
     return { ok: res.ok, data };
   }
 
-  // /api/seo/{audit,page,architecture,programmatic} all stream NDJSON so the
-  // form can paint the same Swiss step list regardless of which command the
-  // user chose. Rewrite still returns a single JSON object since it kicks off
-  // a non-LLM Playwright capture flow with no per-step granularity.
+  // /api/seo/{audit,page,architecture,programmatic} all stream NDJSON. We
+  // capture two ids from the stream:
+  //   initId     — pre-allocated record id sent before any work starts.
+  //                Lets us navigate even if the connection drops before the
+  //                final "complete" event (Vercel sometimes buffers / kills
+  //                the trailing chunk on long-running functions).
+  //   completeId — sent after the report is saved. Same id; arrival means
+  //                the report row in the DB is fully populated.
+  // On stream end we navigate to whichever id we have.
   async function runStream(endpoint: string, payload: Record<string, unknown>) {
     const res = await fetch(endpoint, {
       method: "POST",
@@ -96,7 +106,6 @@ export default function NewAuditForm({
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
-      // Quota or validation error — body is plain JSON, not a stream.
       const { ok, data } = await handleResponse(res);
       if (!ok && res.status !== 402) throw new Error(data.error ?? "Request failed");
       return;
@@ -106,7 +115,8 @@ export default function NewAuditForm({
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let savedId: string | null = null;
+    let initId: string | null = null;
+    let completeId: string | null = null;
     let streamError: string | null = null;
 
     while (true) {
@@ -119,7 +129,9 @@ export default function NewAuditForm({
         if (!line) continue;
         let event: AuditStreamEvent;
         try { event = JSON.parse(line) as AuditStreamEvent; } catch { continue; }
-        if (event.type === "start") {
+        if (event.type === "init") {
+          initId = event.id;
+        } else if (event.type === "start") {
           setSteps(event.steps.map((s) => ({ ...s, status: "pending" })));
         } else if (event.type === "step") {
           setSteps((prev) =>
@@ -138,23 +150,26 @@ export default function NewAuditForm({
             ),
           );
         } else if (event.type === "complete") {
-          savedId = event.id;
+          completeId = event.id;
         } else if (event.type === "error") {
           streamError = event.error;
+          if (event.id) initId = initId ?? event.id;
         }
       }
       if (done) break;
     }
 
     if (streamError) throw new Error(streamError);
-    if (!savedId) throw new Error("Audit finished without saving a record.");
-    router.push(`/audits/${savedId}`);
+    const navigateId = completeId ?? initId;
+    if (!navigateId) throw new Error("Audit finished without saving a record.");
+    router.push(`/audits/${navigateId}`);
     router.refresh();
   }
 
   async function submit() {
     setError(null);
     setSteps([]);
+    setProgressError(null);
     setLoading(true);
     try {
       if (skill === "rewrite") {
@@ -166,17 +181,24 @@ export default function NewAuditForm({
         const { ok, data } = await handleResponse(res);
         if (!ok) {
           if (res.status !== 402) throw new Error(data.error ?? "Request failed");
-          return; // quota dialog handled it
+          return;
         }
         router.push(`/rewrite-content/${data.id}`);
         router.refresh();
         return;
       }
+      // Open the modal up front so the user sees something immediately, even
+      // before the first event arrives from the stream.
+      setProgressUrl(url);
+      setProgressSkill(skill);
+      setProgressOpen(true);
       const payload: { url: string; playbook?: string } = { url };
       if (skill === "programmatic" && playbook) payload.playbook = playbook;
       await runStream(`/api/seo/${skill}`, payload);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Request failed");
+      const message = err instanceof Error ? err.message : "Request failed";
+      setError(message);
+      setProgressError(message);
     } finally {
       setLoading(false);
     }
@@ -267,64 +289,14 @@ export default function NewAuditForm({
         </div>
       )}
 
-      {skill !== "rewrite" && steps.length > 0 && (
-        <div className="border-t border-hairline pt-4">
-          <div className="mb-3 flex items-center justify-between">
-            <span className="swiss-eyebrow text-muted">— /seo {skill} pipeline</span>
-            <span className="font-mono text-[10px] text-muted">
-              {steps.filter((s) => s.status === "done").length}/{steps.length}
-            </span>
-          </div>
-          <ol className="flex flex-col">
-            {steps.map((s) => {
-              const num = s.index.toString().padStart(2, "0");
-              const isQueued = s.status === "queued";
-              const isRunning = s.status === "running";
-              const isDone = s.status === "done";
-              const isFailed = s.status === "failed";
-              const isActive = isQueued || isRunning;
-              return (
-                <li
-                  key={s.index}
-                  className="flex items-center gap-3 border-b border-hairline py-2 last:border-b-0"
-                >
-                  <span className="w-8 font-mono text-[10px] tracking-wider text-muted">{num}</span>
-                  <span
-                    className={`inline-block h-2 w-2 shrink-0 transition-colors ${
-                      isFailed
-                        ? "bg-accent"
-                        : isDone
-                          ? "bg-foreground"
-                          : isRunning
-                            ? "animate-pulse bg-foreground"
-                            : isQueued
-                              ? "bg-hairline"
-                              : "border border-hairline"
-                    }`}
-                    aria-hidden
-                  />
-                  <span
-                    className={`flex-1 text-sm transition-colors ${
-                      isDone || isFailed || isActive ? "text-foreground" : "text-muted"
-                    }`}
-                  >
-                    {s.label}
-                    {isFailed && s.error && (
-                      <span className="ml-2 text-xs text-accent">— {s.error}</span>
-                    )}
-                  </span>
-                  <span className="font-mono text-[10px] text-muted">
-                    {isQueued && "queued…"}
-                    {isRunning && "running…"}
-                    {isDone && s.durationMs != null && `${(s.durationMs / 1000).toFixed(1)}s`}
-                    {isFailed && "failed"}
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
-        </div>
-      )}
+      <AuditProgressModal
+        open={progressOpen}
+        url={progressUrl}
+        skill={progressSkill}
+        steps={steps}
+        error={progressError}
+        onClose={() => setProgressOpen(false)}
+      />
 
       {plans && plans.length > 0 && (
         <UpgradeDialog
