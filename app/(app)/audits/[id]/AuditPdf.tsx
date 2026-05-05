@@ -317,20 +317,31 @@ function priorityStyle(priority: Priority) {
   return [styles.priorityBadge, styles.priorityLow];
 }
 
+// Coerce arbitrary score-shaped input (number, string from LLM, null, NaN)
+// into a finite 0-100. Without this, NaN flows into a percentage string like
+// "NaN%" which yoga converts into garbage like -1.9e+21 and react-pdf throws
+// "unsupported number".
+function safeScore(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
 function barColor(value: number): string {
   return value >= 80 ? COLORS.emerald : value >= 60 ? COLORS.amber : COLORS.accent;
 }
 
 function ScoreLine({ label, value, weight }: { label: string; value: number; weight?: string }) {
+  const v = safeScore(value);
   return (
     <View style={styles.scoreRow}>
       <Text style={styles.scoreLabel}>{label}</Text>
       <Text style={styles.scoreWeight}>{weight ?? ""}</Text>
       <View style={styles.scoreBarWrap}>
-        <View style={[styles.scoreBar, { width: `${Math.max(0, Math.min(100, value))}%`, backgroundColor: barColor(value) }]} />
+        <View style={[styles.scoreBar, { width: `${v}%`, backgroundColor: barColor(v) }]} />
       </View>
       <Text style={styles.scoreValue}>
-        {value}
+        {v}
         <Text style={styles.scoreValueMuted}>/100</Text>
       </Text>
     </View>
@@ -403,7 +414,7 @@ function CategoryBlock({
         </View>
         <Text style={styles.catTitle}>{title}</Text>
         <Text style={styles.catScore}>
-          {report.score}
+          {safeScore(report.score)}
           <Text style={styles.scoreValueMuted}>/100</Text>
         </Text>
       </View>
@@ -542,7 +553,7 @@ function AuditDoc({
           <View style={styles.heroLeft}>
             <Text style={styles.eyebrow}>— 01 / Health Score</Text>
             <View style={{ flexDirection: "row", alignItems: "flex-end", marginTop: 6 }}>
-              <Text style={styles.heroScore}>{a.overallScore}</Text>
+              <Text style={styles.heroScore}>{safeScore(a.overallScore)}</Text>
               <Text style={styles.heroSlash}>/100</Text>
             </View>
             <Text style={styles.summary}>{a.executiveSummary}</Text>
@@ -619,7 +630,7 @@ function AuditDoc({
               <View style={styles.eeatCardHead}>
                 <Text style={styles.eyebrow}>{k}</Text>
                 <Text style={styles.scoreValue}>
-                  {a.categories.content.eeat[k].score}
+                  {safeScore(a.categories.content.eeat[k].score)}
                   <Text style={styles.scoreValueMuted}>/100</Text>
                 </Text>
               </View>
@@ -644,7 +655,7 @@ function AuditDoc({
         >
           <Text style={styles.eyebrow}>AI Citation Readiness</Text>
           <Text style={styles.scoreValue}>
-            {a.categories.content.aiCitationReadiness}
+            {safeScore(a.categories.content.aiCitationReadiness)}
             <Text style={styles.scoreValueMuted}>/100</Text>
           </Text>
         </View>
@@ -729,7 +740,7 @@ function PageDoc({
           <View style={styles.heroLeft}>
             <Text style={styles.eyebrow}>— 01 / Page Score</Text>
             <View style={{ flexDirection: "row", alignItems: "flex-end", marginTop: 6 }}>
-              <Text style={styles.heroScore}>{r.overallScore}</Text>
+              <Text style={styles.heroScore}>{safeScore(r.overallScore)}</Text>
               <Text style={styles.heroSlash}>/100</Text>
             </View>
             <Text style={styles.summary}>{r.summary}</Text>
