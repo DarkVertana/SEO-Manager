@@ -111,21 +111,24 @@ export async function runAudit(
   if (!industryStep.ok) throw industryStep.reason;
   const industry = industryStep.value;
 
-  // Parallel subagent delegation (skills/seo-audit/SKILL.md step 4).
-  // allSettled so a single agent failing (rate limit, malformed JSON, timeout)
-  // degrades that one category to a placeholder instead of nuking the whole
-  // audit. We log the rejection reason so it surfaces in Vercel function logs.
-  // Each agent is wrapped in trackStep so the UI sees individual completion
-  // events as they finish (even though they all start together).
-  const settled = await Promise.allSettled([
-    trackStep(3, AUDIT_STEPS[2], emit, () => runTechnical({ parsed, robots, sitemap })),
-    trackStep(4, AUDIT_STEPS[3], emit, () => runContent(parsed)),
-    trackStep(5, AUDIT_STEPS[4], emit, () => runSchema(parsed)),
-    trackStep(6, AUDIT_STEPS[5], emit, () => runOnPage(parsed)),
-    trackStep(7, AUDIT_STEPS[6], emit, () => runPerformance(parsed)),
-    trackStep(8, AUDIT_STEPS[7], emit, () => runGeo({ parsed, robots })),
-    trackStep(9, AUDIT_STEPS[8], emit, () => runImages(parsed)),
-  ]);
+  // Sequential subagent delegation. We previously kicked these off in parallel
+  // via Promise.allSettled, but trackStep emits "running" before its inner fn
+  // queues on the GLM concurrency semaphore — so the UI saw all 7 rows flip
+  // to running at once. With z.ai's coding-plan rate limit we already
+  // serialize at the GLM layer (GLM_CONCURRENCY=1 by default), so running the
+  // wrappers sequentially has the same wall-clock cost while letting each
+  // step's status accurately reflect what's executing right now.
+  type StepResult<T> = { ok: true; value: T } | { ok: false; reason: unknown };
+  const technicalRes = await trackStep(3, AUDIT_STEPS[2], emit, () => runTechnical({ parsed, robots, sitemap }));
+  const contentRes = await trackStep(4, AUDIT_STEPS[3], emit, () => runContent(parsed));
+  const schemaRes = await trackStep(5, AUDIT_STEPS[4], emit, () => runSchema(parsed));
+  const onPageRes = await trackStep(6, AUDIT_STEPS[5], emit, () => runOnPage(parsed));
+  const performanceRes = await trackStep(7, AUDIT_STEPS[6], emit, () => runPerformance(parsed));
+  const aiSearchRes = await trackStep(8, AUDIT_STEPS[7], emit, () => runGeo({ parsed, robots }));
+  const imagesRes = await trackStep(9, AUDIT_STEPS[8], emit, () => runImages(parsed));
+  const settled: StepResult<unknown>[] = [
+    technicalRes, contentRes, schemaRes, onPageRes, performanceRes, aiSearchRes, imagesRes,
+  ];
   const labels = ["technical", "content", "schema", "onPage", "performance", "aiSearch", "images"] as const;
   const placeholder = (label: string) => ({
     score: 0,
@@ -151,15 +154,8 @@ export async function runAudit(
   });
   const unwrap = <T,>(idx: number, fallback: T): T => {
     const r = settled[idx];
-    // trackStep never throws, so the outer Promise always fulfills with its
-    // discriminated result. Reject path is theoretical safety only.
-    if (r.status === "rejected") {
-      console.error(`[audit] ${labels[idx]} agent crashed:`, r.reason);
-      return fallback;
-    }
-    const inner = r.value;
-    if (inner.ok) return inner.value as T;
-    console.error(`[audit] ${labels[idx]} agent failed:`, inner.reason);
+    if (r.ok) return r.value as T;
+    console.error(`[audit] ${labels[idx]} agent failed:`, r.reason);
     return fallback;
   };
   const technical = unwrap(0, placeholder("technical"));
