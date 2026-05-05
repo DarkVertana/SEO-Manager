@@ -4,10 +4,17 @@
 // same shape as the prior @google/genai integration so callers do not need
 // to change.
 
-const BASE_URL = process.env.ZAI_BASE_URL ?? "https://api.z.ai/api/paas/v4";
+// Defaults to the GLM Coding Plan endpoint, which is billed against an active
+// coding subscription rather than the pay-per-token PaaS balance. Override
+// with ZAI_BASE_URL=https://api.z.ai/api/paas/v4 to use the pay-as-you-go API.
+const BASE_URL = process.env.ZAI_BASE_URL ?? "https://api.z.ai/api/coding/paas/v4";
 
 export const GLM_MODEL = "glm-5.1";
 export const GLM_EMBED_MODEL = "embedding-3";
+// glm-5.1 is text-only. Vision-only callers (e.g. the section rewriter) should
+// pass `model` explicitly or set ZAI_VISION_MODEL to a vision-capable variant
+// like glm-4.5v before re-enabling /seo rewrite.
+const VISION_MODEL = process.env.ZAI_VISION_MODEL ?? "glm-4.5v";
 
 export type JsonSchema = Record<string, unknown>;
 
@@ -35,6 +42,7 @@ function getKey(): string {
 
 async function chat(args: {
   messages: ChatMessage[];
+  model?: string;
   temperature?: number;
   max_tokens?: number;
   response_format?: ResponseFormat;
@@ -46,7 +54,7 @@ async function chat(args: {
       Authorization: `Bearer ${getKey()}`,
     },
     body: JSON.stringify({
-      model: GLM_MODEL,
+      model: args.model ?? GLM_MODEL,
       messages: args.messages,
       temperature: args.temperature,
       max_tokens: args.max_tokens,
@@ -114,6 +122,7 @@ export async function generateJsonMultimodal<T>(args: {
       { role: "system", content: args.systemInstruction },
       { role: "user", content: args.parts },
     ],
+    model: VISION_MODEL,
     temperature: args.temperature ?? 0.4,
     response_format: {
       type: "json_schema",
