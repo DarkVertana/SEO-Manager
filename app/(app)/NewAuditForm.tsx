@@ -6,6 +6,19 @@ import UpgradeDialog, { type PlanCard } from "./UpgradeDialog";
 
 export type SkillId = "audit" | "page" | "architecture" | "programmatic" | "rewrite";
 
+type StepStatus = "pending" | "running" | "done" | "failed";
+type StepRow = { index: number; label: string; status: StepStatus; error?: string; durationMs?: number };
+
+// Shape of an event line emitted by /api/seo/audit (NDJSON stream). Mirrors
+// AuditEvent in lib/seo/audit.ts plus the wrapper events the route adds.
+type AuditStreamEvent =
+  | { type: "start"; total: number; steps: { index: number; label: string }[] }
+  | { type: "step"; index: number; label: string; status: "running" }
+  | { type: "step"; index: number; label: string; status: "done"; durationMs: number }
+  | { type: "step"; index: number; label: string; status: "failed"; error: string; durationMs: number }
+  | { type: "complete"; id: string }
+  | { type: "error"; error: string };
+
 const PLAYBOOKS = [
   "Templates",
   "Curation",
@@ -46,6 +59,7 @@ export default function NewAuditForm({
   const [error, setError] = useState<string | null>(null);
   const [quotaOpen, setQuotaOpen] = useState(false);
   const [quotaMessage, setQuotaMessage] = useState<string | null>(null);
+  const [steps, setSteps] = useState<StepRow[]>([]);
 
   // 402 = Payment Required = our quota gate fired. Open the upgrade popup
   // instead of showing the inline error pill. For other failures, surface the
@@ -70,10 +84,78 @@ export default function NewAuditForm({
     return { ok: res.ok, data };
   }
 
+  // /api/seo/audit returns NDJSON so the UI can paint per-agent progress.
+  // Other commands (page/architecture/programmatic/rewrite) still return a
+  // single JSON object — they only run one agent so a step list adds noise.
+  async function runAuditStream(payload: { url: string }) {
+    const res = await fetch(`/api/seo/audit`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      // Quota or validation error — body is plain JSON, not a stream.
+      const { ok, data } = await handleResponse(res);
+      if (!ok && res.status !== 402) throw new Error(data.error ?? "Request failed");
+      return;
+    }
+    if (!res.body) throw new Error("Audit stream unavailable.");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let savedId: string | null = null;
+    let streamError: string | null = null;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (value) buffer += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (!line) continue;
+        let event: AuditStreamEvent;
+        try { event = JSON.parse(line) as AuditStreamEvent; } catch { continue; }
+        if (event.type === "start") {
+          setSteps(event.steps.map((s) => ({ ...s, status: "pending" })));
+        } else if (event.type === "step") {
+          setSteps((prev) =>
+            prev.map((row) =>
+              row.index === event.index
+                ? {
+                    ...row,
+                    status: event.status,
+                    error: event.status === "failed" ? event.error : undefined,
+                    durationMs: event.status === "running" ? row.durationMs : event.durationMs,
+                  }
+                : row,
+            ),
+          );
+        } else if (event.type === "complete") {
+          savedId = event.id;
+        } else if (event.type === "error") {
+          streamError = event.error;
+        }
+      }
+      if (done) break;
+    }
+
+    if (streamError) throw new Error(streamError);
+    if (!savedId) throw new Error("Audit finished without saving a record.");
+    router.push(`/audits/${savedId}`);
+    router.refresh();
+  }
+
   async function submit() {
     setError(null);
+    setSteps([]);
     setLoading(true);
     try {
+      if (skill === "audit") {
+        await runAuditStream({ url });
+        return;
+      }
       if (skill === "rewrite") {
         const res = await fetch(`/api/seo/rewrite/capture`, {
           method: "POST",
@@ -188,10 +270,68 @@ export default function NewAuditForm({
         {loading ? `Running /seo ${skill}…` : `Run /seo ${skill} →`}
       </button>
 
-      {loading && (
+      {loading && skill !== "audit" && (
         <div className="flex items-center gap-2 text-xs text-muted">
           <span className="inline-block h-1 w-1 animate-pulse bg-accent" />
           <span>{LOADING_COPY[skill]}</span>
+        </div>
+      )}
+
+      {skill === "audit" && steps.length > 0 && (
+        <div className="border-t border-hairline pt-4">
+          <div className="mb-3 flex items-center justify-between">
+            <span className="swiss-eyebrow text-muted">— Audit pipeline</span>
+            <span className="font-mono text-[10px] text-muted">
+              {steps.filter((s) => s.status === "done").length}/{steps.length}
+            </span>
+          </div>
+          <ol className="flex flex-col">
+            {steps.map((s) => {
+              const num = s.index.toString().padStart(2, "0");
+              const isRunning = s.status === "running";
+              const isDone = s.status === "done";
+              const isFailed = s.status === "failed";
+              return (
+                <li
+                  key={s.index}
+                  className="flex items-center gap-3 border-b border-hairline py-2 last:border-b-0"
+                >
+                  <span className="w-8 font-mono text-[10px] tracking-wider text-muted">{num}</span>
+                  <span
+                    className={`inline-block h-2 w-2 shrink-0 transition-colors ${
+                      isFailed
+                        ? "bg-accent"
+                        : isDone
+                          ? "bg-foreground"
+                          : isRunning
+                            ? "animate-pulse bg-foreground"
+                            : "border border-hairline"
+                    }`}
+                    aria-hidden
+                  />
+                  <span
+                    className={`flex-1 text-sm transition-colors ${
+                      isDone || isFailed
+                        ? "text-foreground"
+                        : isRunning
+                          ? "text-foreground"
+                          : "text-muted"
+                    }`}
+                  >
+                    {s.label}
+                    {isFailed && s.error && (
+                      <span className="ml-2 text-xs text-accent">— {s.error}</span>
+                    )}
+                  </span>
+                  <span className="font-mono text-[10px] text-muted">
+                    {isRunning && "running…"}
+                    {isDone && s.durationMs != null && `${(s.durationMs / 1000).toFixed(1)}s`}
+                    {isFailed && "failed"}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
         </div>
       )}
 

@@ -45,28 +45,86 @@ function buildActionPlan(issues: Issue[]): { priority: Priority; items: Issue[] 
   }));
 }
 
-export async function runAudit(url: string): Promise<AuditReport> {
-  const parsed = await fetchAndParse(url);
-  const [robots] = await Promise.all([fetchRobots(url)]);
-  const sitemap = await fetchSitemap(url, robots);
+// Lifecycle event emitted by runAudit so the API can stream per-agent
+// progress back to the UI. `index` is 1-based across the full step list
+// (Fetch + Industry + the 7 category agents = 9 steps).
+export type AuditEvent =
+  | { type: "start"; total: number; steps: { index: number; label: string }[] }
+  | { type: "step"; index: number; label: string; status: "running" }
+  | { type: "step"; index: number; label: string; status: "done"; durationMs: number }
+  | { type: "step"; index: number; label: string; status: "failed"; error: string; durationMs: number };
+
+const AUDIT_STEPS = [
+  "Fetch page · robots · sitemap",
+  "Industry detection",
+  "Technical SEO",
+  "Content quality + E-E-A-T",
+  "Schema / structured data",
+  "On-page SEO",
+  "Performance / Core Web Vitals",
+  "AI search readiness (GEO)",
+  "Images",
+] as const;
+
+async function trackStep<T>(
+  index: number,
+  label: string,
+  emit: ((e: AuditEvent) => void) | undefined,
+  fn: () => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false; reason: unknown }> {
+  emit?.({ type: "step", index, label, status: "running" });
+  const startedAt = Date.now();
+  try {
+    const value = await fn();
+    emit?.({ type: "step", index, label, status: "done", durationMs: Date.now() - startedAt });
+    return { ok: true, value };
+  } catch (reason) {
+    const error = reason instanceof Error ? reason.message : String(reason);
+    emit?.({ type: "step", index, label, status: "failed", error, durationMs: Date.now() - startedAt });
+    return { ok: false, reason };
+  }
+}
+
+export async function runAudit(
+  url: string,
+  emit?: (event: AuditEvent) => void,
+): Promise<AuditReport> {
+  emit?.({
+    type: "start",
+    total: AUDIT_STEPS.length,
+    steps: AUDIT_STEPS.map((label, i) => ({ index: i + 1, label })),
+  });
+
+  const fetchStep = await trackStep(1, AUDIT_STEPS[0], emit, async () => {
+    const parsed = await fetchAndParse(url);
+    const [robots] = await Promise.all([fetchRobots(url)]);
+    const sitemap = await fetchSitemap(url, robots);
+    return { parsed, robots, sitemap };
+  });
+  if (!fetchStep.ok) throw fetchStep.reason;
+  const { parsed, robots, sitemap } = fetchStep.value;
 
   // Industry detection runs first because some SKILL.md sub-skills are
   // industry-conditional in the upstream orchestrator. Here we use it to
   // contextualize prompts (and surface to the user).
-  const industry = await detectIndustry(parsed);
+  const industryStep = await trackStep(2, AUDIT_STEPS[1], emit, () => detectIndustry(parsed));
+  if (!industryStep.ok) throw industryStep.reason;
+  const industry = industryStep.value;
 
   // Parallel subagent delegation (skills/seo-audit/SKILL.md step 4).
   // allSettled so a single agent failing (rate limit, malformed JSON, timeout)
   // degrades that one category to a placeholder instead of nuking the whole
   // audit. We log the rejection reason so it surfaces in Vercel function logs.
+  // Each agent is wrapped in trackStep so the UI sees individual completion
+  // events as they finish (even though they all start together).
   const settled = await Promise.allSettled([
-    runTechnical({ parsed, robots, sitemap }),
-    runContent(parsed),
-    runSchema(parsed),
-    runOnPage(parsed),
-    runPerformance(parsed),
-    runGeo({ parsed, robots }),
-    runImages(parsed),
+    trackStep(3, AUDIT_STEPS[2], emit, () => runTechnical({ parsed, robots, sitemap })),
+    trackStep(4, AUDIT_STEPS[3], emit, () => runContent(parsed)),
+    trackStep(5, AUDIT_STEPS[4], emit, () => runSchema(parsed)),
+    trackStep(6, AUDIT_STEPS[5], emit, () => runOnPage(parsed)),
+    trackStep(7, AUDIT_STEPS[6], emit, () => runPerformance(parsed)),
+    trackStep(8, AUDIT_STEPS[7], emit, () => runGeo({ parsed, robots })),
+    trackStep(9, AUDIT_STEPS[8], emit, () => runImages(parsed)),
   ]);
   const labels = ["technical", "content", "schema", "onPage", "performance", "aiSearch", "images"] as const;
   const placeholder = (label: string) => ({
@@ -93,8 +151,15 @@ export async function runAudit(url: string): Promise<AuditReport> {
   });
   const unwrap = <T,>(idx: number, fallback: T): T => {
     const r = settled[idx];
-    if (r.status === "fulfilled") return r.value as T;
-    console.error(`[audit] ${labels[idx]} agent failed:`, r.reason);
+    // trackStep never throws, so the outer Promise always fulfills with its
+    // discriminated result. Reject path is theoretical safety only.
+    if (r.status === "rejected") {
+      console.error(`[audit] ${labels[idx]} agent crashed:`, r.reason);
+      return fallback;
+    }
+    const inner = r.value;
+    if (inner.ok) return inner.value as T;
+    console.error(`[audit] ${labels[idx]} agent failed:`, inner.reason);
     return fallback;
   };
   const technical = unwrap(0, placeholder("technical"));
