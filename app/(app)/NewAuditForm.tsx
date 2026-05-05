@@ -85,11 +85,12 @@ export default function NewAuditForm({
     return { ok: res.ok, data };
   }
 
-  // /api/seo/audit returns NDJSON so the UI can paint per-agent progress.
-  // Other commands (page/architecture/programmatic/rewrite) still return a
-  // single JSON object — they only run one agent so a step list adds noise.
-  async function runAuditStream(payload: { url: string }) {
-    const res = await fetch(`/api/seo/audit`, {
+  // /api/seo/{audit,page,architecture,programmatic} all stream NDJSON so the
+  // form can paint the same Swiss step list regardless of which command the
+  // user chose. Rewrite still returns a single JSON object since it kicks off
+  // a non-LLM Playwright capture flow with no per-step granularity.
+  async function runStream(endpoint: string, payload: Record<string, unknown>) {
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
@@ -156,10 +157,6 @@ export default function NewAuditForm({
     setSteps([]);
     setLoading(true);
     try {
-      if (skill === "audit") {
-        await runAuditStream({ url });
-        return;
-      }
       if (skill === "rewrite") {
         const res = await fetch(`/api/seo/rewrite/capture`, {
           method: "POST",
@@ -177,18 +174,7 @@ export default function NewAuditForm({
       }
       const payload: { url: string; playbook?: string } = { url };
       if (skill === "programmatic" && playbook) payload.playbook = playbook;
-      const res = await fetch(`/api/seo/${skill}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const { ok, data } = await handleResponse(res);
-      if (!ok) {
-        if (res.status !== 402) throw new Error(data.error ?? "Request failed");
-        return;
-      }
-      router.push(`/audits/${data.id}`);
-      router.refresh();
+      await runStream(`/api/seo/${skill}`, payload);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Request failed");
     } finally {
@@ -274,17 +260,17 @@ export default function NewAuditForm({
         {loading ? `Running /seo ${skill}…` : `Run /seo ${skill} →`}
       </button>
 
-      {loading && skill !== "audit" && (
+      {loading && skill === "rewrite" && (
         <div className="flex items-center gap-2 text-xs text-muted">
           <span className="inline-block h-1 w-1 animate-pulse bg-accent" />
           <span>{LOADING_COPY[skill]}</span>
         </div>
       )}
 
-      {skill === "audit" && steps.length > 0 && (
+      {skill !== "rewrite" && steps.length > 0 && (
         <div className="border-t border-hairline pt-4">
           <div className="mb-3 flex items-center justify-between">
-            <span className="swiss-eyebrow text-muted">— Audit pipeline</span>
+            <span className="swiss-eyebrow text-muted">— /seo {skill} pipeline</span>
             <span className="font-mono text-[10px] text-muted">
               {steps.filter((s) => s.status === "done").length}/{steps.length}
             </span>

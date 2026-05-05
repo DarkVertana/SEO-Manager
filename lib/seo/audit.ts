@@ -243,10 +243,25 @@ export async function runAudit(
 
 // --- Single-page wrapper (skills/seo-page/SKILL.md) ---
 
-export async function runPage(url: string): Promise<PageReport> {
-  const parsed = await fetchAndParse(url);
-  const industry = await detectIndustry(parsed);
-  const deep = await runPageDeep(parsed);
+const PAGE_STEPS = ["Fetch page", "Industry detection", "Deep page analysis"] as const;
+
+export async function runPage(
+  url: string,
+  emit?: (event: AuditEvent) => void,
+): Promise<PageReport> {
+  emit?.({ type: "start", total: PAGE_STEPS.length, steps: PAGE_STEPS.map((label, i) => ({ index: i + 1, label })) });
+
+  const fetchStep = await trackStep(1, PAGE_STEPS[0], emit, () => fetchAndParse(url));
+  if (!fetchStep.ok) throw fetchStep.reason;
+  const parsed = fetchStep.value;
+
+  const industryStep = await trackStep(2, PAGE_STEPS[1], emit, () => detectIndustry(parsed));
+  if (!industryStep.ok) throw industryStep.reason;
+  const industry = industryStep.value;
+
+  const deepStep = await trackStep(3, PAGE_STEPS[2], emit, () => runPageDeep(parsed));
+  if (!deepStep.ok) throw deepStep.reason;
+  const deep = deepStep.value;
 
   // seo-page uses its own 5-pillar scoring (no AI/Performance separation).
   // Roll up to overall via simple average of the 5 pillars per the SKILL.md
@@ -282,13 +297,26 @@ export async function runPage(url: string): Promise<PageReport> {
 
 // --- Programmatic SEO wrapper (marketingskills/programmatic-seo) ---
 
+const PROGRAMMATIC_STEPS = ["Fetch page", "Industry detection", "Programmatic playbook"] as const;
+
 export async function runProgrammaticSeo(
   url: string,
   preferredPlaybook?: ProgrammaticPlaybook,
+  emit?: (event: AuditEvent) => void,
 ): Promise<ProgrammaticReport> {
-  const parsed = await fetchAndParse(url);
-  const industry = await detectIndustry(parsed);
-  const result = await runProgrammatic({ parsed, preferredPlaybook });
+  emit?.({ type: "start", total: PROGRAMMATIC_STEPS.length, steps: PROGRAMMATIC_STEPS.map((label, i) => ({ index: i + 1, label })) });
+
+  const fetchStep = await trackStep(1, PROGRAMMATIC_STEPS[0], emit, () => fetchAndParse(url));
+  if (!fetchStep.ok) throw fetchStep.reason;
+  const parsed = fetchStep.value;
+
+  const industryStep = await trackStep(2, PROGRAMMATIC_STEPS[1], emit, () => detectIndustry(parsed));
+  if (!industryStep.ok) throw industryStep.reason;
+  const industry = industryStep.value;
+
+  const playbookStep = await trackStep(3, PROGRAMMATIC_STEPS[2], emit, () => runProgrammatic({ parsed, preferredPlaybook }));
+  if (!playbookStep.ok) throw playbookStep.reason;
+  const result = playbookStep.value;
 
   return {
     url,
@@ -311,10 +339,25 @@ export async function runProgrammaticSeo(
 
 // --- Site architecture wrapper (marketingskills/site-architecture) ---
 
-export async function runArchitecture(url: string): Promise<ArchitectureReport> {
-  const parsed = await fetchAndParse(url);
-  const industry = await detectIndustry(parsed);
-  const result = await runSiteArchitecture({ parsed });
+const ARCHITECTURE_STEPS = ["Fetch page", "Industry detection", "Site architecture"] as const;
+
+export async function runArchitecture(
+  url: string,
+  emit?: (event: AuditEvent) => void,
+): Promise<ArchitectureReport> {
+  emit?.({ type: "start", total: ARCHITECTURE_STEPS.length, steps: ARCHITECTURE_STEPS.map((label, i) => ({ index: i + 1, label })) });
+
+  const fetchStep = await trackStep(1, ARCHITECTURE_STEPS[0], emit, () => fetchAndParse(url));
+  if (!fetchStep.ok) throw fetchStep.reason;
+  const parsed = fetchStep.value;
+
+  const industryStep = await trackStep(2, ARCHITECTURE_STEPS[1], emit, () => detectIndustry(parsed));
+  if (!industryStep.ok) throw industryStep.reason;
+  const industry = industryStep.value;
+
+  const archStep = await trackStep(3, ARCHITECTURE_STEPS[2], emit, () => runSiteArchitecture({ parsed }));
+  if (!archStep.ok) throw archStep.reason;
+  const result = archStep.value;
 
   return {
     url,

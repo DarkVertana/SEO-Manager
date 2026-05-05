@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { runProgrammaticSeo } from "@/lib/seo/audit";
+import { runProgrammaticSeo, type AuditEvent } from "@/lib/seo/audit";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth/server";
 import { PROGRAMMATIC_PLAYBOOKS, type ProgrammaticPlaybook } from "@/lib/seo/references";
@@ -10,6 +10,7 @@ const VALID_PLAYBOOKS = new Set(PROGRAMMATIC_PLAYBOOKS.map((p) => p.name));
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
+// NDJSON stream — see app/api/seo/audit/route.ts for the protocol.
 export async function POST(request: NextRequest) {
   const session = await getSession();
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -32,23 +33,42 @@ export async function POST(request: NextRequest) {
     ? (body.playbook as ProgrammaticPlaybook)
     : undefined;
 
-  try {
-    const report = await runProgrammaticSeo(target.toString(), preferredPlaybook);
-    const saved = await db.seoAnalysis.create({
-      data: {
-        userId: session.uid,
-        url: target.toString(),
-        command: "programmatic",
-        industry: report.industry.industry,
-        overallScore: 100 - report.thinContentRiskScore,
-        scores: {},
-        parsed: {},
-        report: report as unknown as object,
-      },
-    });
-    return Response.json({ id: saved.id, report });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Programmatic SEO analysis failed";
-    return Response.json({ error: message }, { status: 500 });
-  }
+  const encoder = new TextEncoder();
+  type FinalEvent = { type: "complete"; id: string } | { type: "error"; error: string };
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (event: AuditEvent | FinalEvent) => {
+        controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+      };
+      try {
+        const report = await runProgrammaticSeo(target.toString(), preferredPlaybook, send);
+        const saved = await db.seoAnalysis.create({
+          data: {
+            userId: session.uid,
+            url: target.toString(),
+            command: "programmatic",
+            industry: report.industry.industry,
+            overallScore: 100 - report.thinContentRiskScore,
+            scores: {},
+            parsed: {},
+            report: report as unknown as object,
+          },
+        });
+        send({ type: "complete", id: saved.id });
+      } catch (err) {
+        send({ type: "error", error: err instanceof Error ? err.message : "Programmatic SEO analysis failed" });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson",
+      "Cache-Control": "no-store, no-transform",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }
