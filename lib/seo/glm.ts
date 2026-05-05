@@ -94,13 +94,13 @@ function sleep(ms: number): Promise<void> {
 // unless GLM_THINKING=enabled is set explicitly.
 const THINKING_ENABLED = process.env.GLM_THINKING === "enabled";
 // Hard cap on completion tokens so a single call cannot eat the entire
-// function budget. The programmatic-SEO schema (alternativePlaybooks,
-// pageTemplate.sections, schemaJsonLd, internalLinkingPlan, etc.) routinely
-// emits ~3-4k tokens; cutting it off produces an unterminated JSON string
-// that parseJsonLoose cannot fully recover from. Default high enough to
-// cover every schema we use; calls that need less finish well before the
-// cap, so this is purely an upper bound.
-const DEFAULT_MAX_TOKENS = Math.max(256, Number(process.env.GLM_MAX_TOKENS ?? 6000));
+// function budget. The programmatic-SEO and schema-suggestions schemas
+// routinely emit ~3-4k tokens; cutting them off produces unterminated
+// strings that parseJsonLoose can only partially recover from. Default
+// high enough to cover every schema we use with comfortable headroom.
+// Calls that need less finish well before the cap, so this is purely
+// an upper bound.
+const DEFAULT_MAX_TOKENS = Math.max(256, Number(process.env.GLM_MAX_TOKENS ?? 8000));
 
 async function chat(args: {
   messages: ChatMessage[];
@@ -282,7 +282,11 @@ export async function generateJson<T>(args: {
       { role: "system", content: buildJsonSystem(args.systemInstruction, args.schema) },
       { role: "user", content: args.prompt },
     ],
-    temperature: args.temperature ?? 0.3,
+    // Default to deterministic sampling (temperature 0) so SEO scores are
+    // stable across re-runs of the same URL. Sampling variance at 0.3 was
+    // producing visibly different scores per agent for identical inputs,
+    // which makes the audit feel untrustworthy. Callers can still override.
+    temperature: args.temperature ?? 0,
     response_format: { type: "json_object" },
   });
   return parseJsonLoose<T>(text);
@@ -318,7 +322,7 @@ export async function generateJsonMultimodal<T>(args: {
       { role: "user", content: args.parts },
     ],
     model: VISION_MODEL,
-    temperature: args.temperature ?? 0.4,
+    temperature: args.temperature ?? 0,
     response_format: { type: "json_object" },
   });
   return parseJsonLoose<T>(text);
